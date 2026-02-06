@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.DS_Store
+randoop/project/
+evosuite/project/
+evosuite/batch_cc/
+evosuite/__pycache__/
+randoop/project/Lang_1_fix/
+randoop/project/Math_1_fix/
+randoop/project/human-eval-java/
