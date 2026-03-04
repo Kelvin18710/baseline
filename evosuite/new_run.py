@@ -22,7 +22,20 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 # ------------------------- Constants -------------------------
-DEFAULT_PROJECTS = ["Lang", "Math", "Cli", "Codec", "Collections", "CSV"]
+DEFAULT_PROJECTS = [
+    "Lang",
+    "Math",
+    "Cli",
+    "Codec",
+    "Collections",
+    "CSV",
+    "Compress",
+    "JCore",
+    "JDataBind",
+    "JXML",
+    "JxPath",
+    "JodaTime",
+]
 BASE_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = BASE_DIR / "project"
 LIB_DIR = BASE_DIR / "lib"
@@ -34,6 +47,12 @@ STABLE_COORDS = {
     "Codec": ("commons-codec", "1.16.0", "commons-codec"),
     "Collections": ("commons-collections4", "4.4", "org.apache.commons"),
     "CSV": ("commons-csv", "1.10.0", "org.apache.commons"),
+    "Compress": ("commons-compress", "1.26.1", "org.apache.commons"),
+    "JCore": ("jackson-core", "2.17.1", "com.fasterxml.jackson.core"),
+    "JDataBind": ("jackson-databind", "2.17.1", "com.fasterxml.jackson.core"),
+    "JXML": ("jackson-dataformat-xml", "2.17.1", "com.fasterxml.jackson.dataformat"),
+    "JxPath": ("commons-jxpath", "1.3", "commons-jxpath"),
+    "JodaTime": ("joda-time", "2.12.7", "joda-time"),
 }
 
 JUNIT_COORD = ("junit", "4.13.2", "junit")
