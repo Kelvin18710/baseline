@@ -41,18 +41,18 @@ PROJECT_ROOT = BASE_DIR / "project"
 LIB_DIR = BASE_DIR / "lib"
 
 STABLE_COORDS = {
-    "Lang": ("commons-lang3", "3.14.0", "org.apache.commons"),
+    "Lang": ("commons-lang3", "3.18.0", "org.apache.commons"),
     "Math": ("commons-math3", "3.6.1", "org.apache.commons"),
     "Cli": ("commons-cli", "1.6.0", "commons-cli"),
-    "Codec": ("commons-codec", "1.16.0", "commons-codec"),
-    "Collections": ("commons-collections4", "4.4", "org.apache.commons"),
-    "CSV": ("commons-csv", "1.10.0", "org.apache.commons"),
-    "Compress": ("commons-compress", "1.26.1", "org.apache.commons"),
-    "JCore": ("jackson-core", "2.17.1", "com.fasterxml.jackson.core"),
-    "JDataBind": ("jackson-databind", "2.17.1", "com.fasterxml.jackson.core"),
-    "JXML": ("jackson-dataformat-xml", "2.17.1", "com.fasterxml.jackson.dataformat"),
-    "JxPath": ("commons-jxpath", "1.3", "commons-jxpath"),
-    "JodaTime": ("joda-time", "2.12.7", "joda-time"),
+    "Codec": ("commons-codec", "1.18.1", "commons-codec"),
+    "Collections": ("commons-collections4", "4.5.0-M4", "org.apache.commons"),
+    "CSV": ("commons-csv", "1.13.0", "org.apache.commons"),
+    "Compress": ("commons-compress", "1.28.0", "org.apache.commons"),
+    "JCore": ("jackson-core", "2.19.0", "com.fasterxml.jackson.core"),
+    "JDataBind": ("jackson-databind", "2.19.0", "com.fasterxml.jackson.core"),
+    "JXML": ("jackson-dataformat-xml", "2.19.0", "com.fasterxml.jackson.dataformat"),
+    "JxPath": ("commons-jxpath", "1.4", "commons-jxpath"),
+    "JodaTime": ("joda-time", "2.13.1", "joda-time"),
 }
 
 JUNIT_COORD = ("junit", "4.13.2", "junit")
@@ -242,13 +242,27 @@ def mark_ignored_tests_by_call(test_file: Optional[Path], target_class: str, met
 
 # ------------------------- Maven / Download -------------------------
 
-def maven_url(group: str, artifact: str, version: str, classifier: Optional[str] = None) -> str:
+_env_repo_base = os.environ.get("MAVEN_REPO_BASE", "").strip()
+_env_repo_fallbacks = os.environ.get("MAVEN_REPO_FALLBACKS", "").strip()
+if _env_repo_fallbacks:
+    MAVEN_BASE_URLS = [u.strip() for u in _env_repo_fallbacks.split(",") if u.strip()]
+elif _env_repo_base:
+    MAVEN_BASE_URLS = [_env_repo_base]
+else:
+    MAVEN_BASE_URLS = [
+        "https://repo1.maven.org/maven2",
+        "https://repo.maven.apache.org/maven2",
+    ]
+
+
+def maven_url(group: str, artifact: str, version: str, classifier: Optional[str] = None, base_url: str = "") -> str:
     path = "/".join([group.replace(".", "/"), artifact, version])
     name = f"{artifact}-{version}"
     if classifier:
         name += f"-{classifier}"
     name += ".jar"
-    return f"https://repo1.maven.org/maven2/{path}/{name}"
+    base = base_url or MAVEN_BASE_URLS[0]
+    return f"{base}/{path}/{name}"
 
 
 def download_artifact(group: str, artifact: str, version: str, classifier: Optional[str] = None) -> Path:
@@ -257,10 +271,18 @@ def download_artifact(group: str, artifact: str, version: str, classifier: Optio
     dest = LIB_DIR / filename
     if dest.exists():
         return dest
-    url = maven_url(group, artifact, version, classifier)
+    last_error = None
     print(f"[i] Downloading {artifact}:{version}{' '+classifier if classifier else ''} ...")
-    urllib.request.urlretrieve(url, dest)
-    return dest
+    for base_url in MAVEN_BASE_URLS:
+        url = maven_url(group, artifact, version, classifier, base_url=base_url)
+        try:
+            urllib.request.urlretrieve(url, dest)
+            return dest
+        except Exception as exc:
+            last_error = exc
+            if dest.exists():
+                dest.unlink()
+    raise RuntimeError(f"Failed to download {artifact}:{version}{' '+classifier if classifier else ''}: {last_error}")
 
 
 def unzip_jar(jar_path: Path, target_dir: Path):
