@@ -1,40 +1,40 @@
 #!/usr/bin/env python3
 """Prefetch all stable project assets for offline execution.
 
-What this script downloads into cache:
-- project binary jars -> cache/lib
-- project source jars -> cache/lib
-- source archives (copied from source jars) -> cache/project_archives
-- EvoSuite/JUnit/Hamcrest/JaCoCo runtime deps -> cache/lib
+What this script downloads:
+- project source archives -> baseline/shared_project_packages/project_archives
+- EvoSuite/JUnit/Hamcrest/JaCoCo runtime deps -> evosuite/cache/lib
 
-After this, run.py can use local archives/jars directly without runtime project downloads.
+After this, run.py can prepare per-tool workspaces only from the shared archive directory.
 """
 
 import argparse
-import shutil
 from pathlib import Path
+import urllib.request
 
 import run as runner
 
 
-def copy_source_jar_to_archives(project: str, artifact: str, version: str) -> Path:
-    src_jar = runner.local_artifact_path(artifact, version, classifier="sources")
-    archive_dir = runner.PROJECT_TAR_DIR
+def project_archive_path(project: str, artifact: str, version: str) -> Path:
+    archive_dir = runner.SHARED_PROJECT_ARCHIVES_DIR
     archive_dir.mkdir(parents=True, exist_ok=True)
-    dst = archive_dir / f"{project.lower()}-{artifact}-{version}-sources.jar"
-    if not dst.exists():
-        shutil.copy2(src_jar, dst)
+    return archive_dir / f"{project.lower()}-{artifact}-{version}-sources.jar"
+
+
+def download_project_archive(project: str, artifact: str, version: str, group: str) -> Path:
+    dst = project_archive_path(project, artifact, version)
+    if dst.exists():
+        return dst
+    url = runner.maven_url(group, artifact, version, classifier="sources")
+    print(f"[i] Downloading shared archive from {url}")
+    urllib.request.urlretrieve(url, dst)
     return dst
 
 
 def prefetch_project(project: str) -> None:
     artifact, version, group = runner.STABLE_COORDS[project]
     print(f"\n=== prefetch {project} ({group}:{artifact}:{version}) ===")
-    bin_jar = runner.download_artifact(group, artifact, version)
-    src_jar = runner.download_artifact(group, artifact, version, classifier="sources")
-    archive = copy_source_jar_to_archives(project, artifact, version)
-    print("[OK] binary:", bin_jar)
-    print("[OK] sources:", src_jar)
+    archive = download_project_archive(project, artifact, version, group)
     print("[OK] archive:", archive)
 
 
@@ -64,7 +64,7 @@ def main() -> None:
 
     print("[i] projects:", ", ".join(projects))
     print("[i] cache/lib:", runner.LIB_DIR)
-    print("[i] cache/project_archives:", runner.PROJECT_TAR_DIR)
+    print("[i] shared/project_archives:", runner.SHARED_PROJECT_ARCHIVES_DIR)
 
     # runtime deps
     evo = runner.ensure_evosuite()
@@ -81,7 +81,7 @@ def main() -> None:
         prefetch_project(project)
 
     print("\n=== done ===")
-    print("All requested assets are cached locally for offline-friendly runs.")
+    print("All requested assets are cached for offline-friendly runs.")
 
 
 if __name__ == "__main__":

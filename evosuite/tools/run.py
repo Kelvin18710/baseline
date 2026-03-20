@@ -39,9 +39,10 @@ DEFAULT_PROJECTS = [
 ]
 SCRIPT_DIR = Path(__file__).resolve().parent
 EVOSUITE_ROOT = SCRIPT_DIR.parent
+BASELINE_ROOT = EVOSUITE_ROOT.parent
 PROJECT_ROOT = EVOSUITE_ROOT / "cache" / "project_workspace"
 LIB_DIR = EVOSUITE_ROOT / "cache" / "lib"
-PROJECT_TAR_DIR = EVOSUITE_ROOT / "cache" / "project_archives"
+SHARED_PROJECT_ARCHIVES_DIR = BASELINE_ROOT / "shared_project_packages" / "project_archives"
 
 STABLE_COORDS = {
     "Lang": ("commons-lang3", "3.18.0", "org.apache.commons"),
@@ -316,13 +317,13 @@ def extract_archive(archive_path: Path, target_dir: Path):
 
 
 def find_local_archive(project: str, artifact: str, version: str) -> Optional[Path]:
-    if not PROJECT_TAR_DIR.exists():
+    if not SHARED_PROJECT_ARCHIVES_DIR.exists():
         return None
     version_prefix = version.split("-")[0]
     artifact_key = artifact.lower()
     artifact_key_alt = artifact_key[:-1] if artifact_key.endswith("4") else artifact_key
     project_key = project.lower()
-    for p in sorted(PROJECT_TAR_DIR.iterdir()):
+    for p in sorted(SHARED_PROJECT_ARCHIVES_DIR.iterdir()):
         if not p.is_file():
             continue
         name = p.name.lower()
@@ -427,7 +428,14 @@ def prepare_stable_project(project: str, need_classes: bool = True) -> Tuple[Pat
     classes_dir = workdir / "classes"
     src_dir = workdir / "sources"
     version_file = workdir / ".version"
-    local_archive = find_local_archive(project, artifact, version)
+    shared_archive = find_local_archive(project, artifact, version)
+    if not shared_archive:
+        raise RuntimeError(
+            f"Shared project archive for {project} not found in {SHARED_PROJECT_ARCHIVES_DIR}. "
+            "Run tools/prefetch_offline_assets.py from evosuite or randoop first."
+        )
+
+    local_archive = workdir / "project_package" / shared_archive.name
     archive_tag = local_archive.name if local_archive else "maven"
     expected_version = f"{group}:{artifact}:{version}:{archive_tag}"
 
@@ -440,39 +448,20 @@ def prepare_stable_project(project: str, need_classes: bool = True) -> Tuple[Pat
         if workdir.exists():
             shutil.rmtree(workdir)
         workdir.mkdir(parents=True, exist_ok=True)
+        local_archive.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(shared_archive, local_archive)
         if local_archive:
             print(f"[i] Using local archive: {local_archive}")
             extract_archive(local_archive, src_dir)
         if need_classes:
             if local_archive:
-                local_bin = local_artifact_path(artifact, version)
-                if local_bin.exists():
-                    print(f"[i] Using cached binary jar: {local_bin}")
-                    unzip_jar(local_bin, classes_dir)
+                classes_from_archive = find_classes_dir(src_dir)
+                if classes_from_archive:
+                    shutil.copytree(classes_from_archive, classes_dir, dirs_exist_ok=True)
                 else:
-                    classes_from_archive = find_classes_dir(src_dir)
-                    if classes_from_archive:
-                        shutil.copytree(classes_from_archive, classes_dir, dirs_exist_ok=True)
-                    else:
-                        print("[i] Building classes from local source archive...")
-                        built_classes = build_from_source(src_dir)
-                        shutil.copytree(built_classes, classes_dir, dirs_exist_ok=True)
-            else:
-                try:
-                    jar = download_artifact(group, artifact, version)
-                    unzip_jar(jar, classes_dir)
-                except Exception as exc:
-                    classes_from_archive = find_classes_dir(src_dir)
-                    if classes_from_archive:
-                        shutil.copytree(classes_from_archive, classes_dir, dirs_exist_ok=True)
-                    else:
-                        raise RuntimeError(
-                            f"Failed to obtain classes for {project}. Provide a binary JAR in {LIB_DIR} "
-                            f"or build classes from source. Original error: {exc}"
-                        )
-        if not local_archive:
-            src_jar = download_artifact(group, artifact, version, classifier="sources")
-            unzip_jar(src_jar, src_dir)
+                    print("[i] Building classes from local source archive...")
+                    built_classes = build_from_source(src_dir)
+                    shutil.copytree(built_classes, classes_dir, dirs_exist_ok=True)
         version_file.write_text(expected_version, encoding="utf-8")
     else:
         print(f"[i] Using cached stable artifact for {project} at {workdir}")

@@ -19,20 +19,7 @@ from typing import List, Tuple
 SCRIPT_DIR = Path(__file__).resolve().parent
 RANDOOP_ROOT = SCRIPT_DIR.parent
 DATA_DIR = RANDOOP_ROOT / "data"
-
-
-def find_cc_scan_script() -> Path:
-    candidates = [
-        RANDOOP_ROOT.parent.parent / "dataset" / "complex" / "cc_scan.py",
-        RANDOOP_ROOT.parent / "dataset" / "complex" / "cc_scan.py",
-    ]
-    for p in candidates:
-        if p.exists():
-            return p
-    raise FileNotFoundError("Cannot locate dataset/complex/cc_scan.py from current workspace")
-
-
-CC_SCAN = find_cc_scan_script()
+CC_SCAN = SCRIPT_DIR / "cc_scan.py"
 
 def run_cc_scan(src_dir: Path, threshold: int = 2) -> List[Tuple[str, str, int]]:
     """
@@ -45,7 +32,7 @@ def run_cc_scan(src_dir: Path, threshold: int = 2) -> List[Tuple[str, str, int]]
     output_csv = DATA_DIR / "complexity" / "_cc_scan_raw.csv"
     output_csv.parent.mkdir(parents=True, exist_ok=True)
 
-    # dataset/complex/cc_scan.py uses "CC > threshold".
+    # Local tools/cc_scan.py uses "CC > threshold".
     # To preserve wrapper semantics "CC >= threshold", pass threshold-1.
     raw_threshold = max(0, threshold - 1)
     cmd = [

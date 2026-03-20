@@ -7,6 +7,7 @@ __pycache__/
 *.tar
 *.tar.gz
 bak/
+shared_project_packages/
 evosuite/cache/project_workspace/
 evosuite/reports/
 evosuite/data/

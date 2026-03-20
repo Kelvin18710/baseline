@@ -40,9 +40,10 @@ DEFAULT_PROJECTS = [
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 RANDOOP_ROOT = SCRIPT_DIR.parent
+BASELINE_ROOT = RANDOOP_ROOT.parent
 PROJECT_ROOT = RANDOOP_ROOT / "cache" / "project_workspace"
 LIB_DIR = RANDOOP_ROOT / "cache" / "lib"
-PROJECT_TAR_DIR = RANDOOP_ROOT / "cache" / "project_archives"
+SHARED_PROJECT_ARCHIVES_DIR = BASELINE_ROOT / "shared_project_packages" / "project_archives"
 
 STABLE_COORDS = {
     "Lang": ("commons-lang3", "3.18.0", "org.apache.commons"),
@@ -160,6 +161,104 @@ def unzip_jar(jar_path: Path, target_dir: Path):
         zf.extractall(target_dir)
 
 
+def extract_archive(archive_path: Path, target_dir: Path):
+    target_dir.mkdir(parents=True, exist_ok=True)
+    name = archive_path.name.lower()
+    if name.endswith((".tar.gz", ".tgz", ".tar")):
+        with tarfile.open(archive_path, "r:*") as tf:
+            tf.extractall(target_dir)
+        return
+    if name.endswith((".zip", ".jar")):
+        with zipfile.ZipFile(archive_path, "r") as zf:
+            zf.extractall(target_dir)
+        return
+    raise RuntimeError(f"Unsupported archive type: {archive_path}")
+
+
+def download_binary_to_workspace(group: str, artifact: str, version: str, archive_dir: Path) -> Path:
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    dest = archive_dir / f"{artifact}-{version}.jar"
+    if dest.exists():
+        return dest
+    url = maven_url(group, artifact, version)
+    print(f"[i] Downloading binary jar for workspace from {url}")
+    try:
+        urllib.request.urlretrieve(url, dest)
+    except Exception as e:
+        dest.unlink(missing_ok=True)
+        raise RuntimeError(f"Failed to download binary jar {artifact}:{version}: {e}")
+    return dest
+
+
+def find_local_archive(project: str, artifact: str, version: str) -> Optional[Path]:
+    if not SHARED_PROJECT_ARCHIVES_DIR.exists():
+        return None
+    version_prefix = version.split("-")[0]
+    artifact_key = artifact.lower()
+    artifact_key_alt = artifact_key[:-1] if artifact_key.endswith("4") else artifact_key
+    project_key = project.lower()
+    for p in sorted(SHARED_PROJECT_ARCHIVES_DIR.iterdir()):
+        if not p.is_file():
+            continue
+        name = p.name.lower()
+        if not name.endswith((".tar.gz", ".tgz", ".tar", ".zip", ".jar")):
+            continue
+        if version in name or version_prefix in name:
+            if artifact_key in name or artifact_key_alt in name or project_key in name:
+                return p
+    return None
+
+
+def find_classes_dir(root: Path) -> Optional[Path]:
+    candidates = [
+        root / "target" / "classes",
+        root / "build" / "classes" / "java" / "main",
+        root / "classes",
+    ]
+    for c in candidates:
+        if c.exists():
+            return c
+    return None
+
+
+def find_build_root(root: Path) -> Optional[Path]:
+    if (root / "pom.xml").exists() or (root / "build.gradle").exists() or (root / "build.gradle.kts").exists():
+        return root
+    for depth in range(1, 3):
+        for base, dirs, files in os.walk(root):
+            rel_depth = Path(base).relative_to(root).parts
+            if len(rel_depth) > depth:
+                dirs[:] = []
+                continue
+            if "pom.xml" in files or "build.gradle" in files or "build.gradle.kts" in files:
+                return Path(base)
+    return None
+
+
+def build_from_source(src_root: Path) -> Path:
+    build_root = find_build_root(src_root)
+    if not build_root:
+        raise RuntimeError(f"Cannot find build root (pom.xml/build.gradle) under {src_root}")
+
+    pom = build_root / "pom.xml"
+    gradle = build_root / "build.gradle"
+    gradle_kts = build_root / "build.gradle.kts"
+
+    if pom.exists():
+        run_cmd(["mvn", "-q", "-DskipTests", "package"], cwd=build_root)
+    elif (build_root / "gradlew").exists():
+        run_cmd(["bash", "-lc", "./gradlew -q classes"], cwd=build_root)
+    elif gradle.exists() or gradle_kts.exists():
+        run_cmd(["gradle", "-q", "classes"], cwd=build_root)
+    else:
+        raise RuntimeError(f"Unsupported build system at {build_root}")
+
+    classes_dir = find_classes_dir(build_root)
+    if not classes_dir:
+        raise RuntimeError(f"Build finished but classes dir not found under {build_root}")
+    return classes_dir
+
+
 def prepare_stable_project(project: str, workdir: Path) -> Tuple[Path, Path, str]:
     """
     Prepare project workspace from stable Maven coordinates.
@@ -167,27 +266,59 @@ def prepare_stable_project(project: str, workdir: Path) -> Tuple[Path, Path, str
     """
     if project not in STABLE_COORDS:
         raise ValueError(f"Unknown project: {project}")
-    
+
     artifact, version, group = STABLE_COORDS[project]
-    workdir.mkdir(parents=True, exist_ok=True)
-    
-    # Download binary
-    bin_jar = download_artifact(group, artifact, version)
+    shared_archive = find_local_archive(project, artifact, version)
+    if not shared_archive:
+        raise RuntimeError(
+            f"Shared project archive for {project} not found in {SHARED_PROJECT_ARCHIVES_DIR}. "
+            "Run tools/prefetch_offline_assets.py from evosuite or randoop first."
+        )
+
     bin_dir = workdir / "bin"
-    bin_dir.mkdir(exist_ok=True)
-    unzip_jar(bin_jar, bin_dir)
-    
-    # Download sources as jar and extract
-    src_jar = download_artifact(group, artifact, version, "sources")
     src_dir = workdir / "src"
-    src_dir.mkdir(exist_ok=True)
-    unzip_jar(src_jar, src_dir)
-    
+    archive_dir = workdir / "project_package"
+    archive_copy = archive_dir / shared_archive.name
+    version_file = workdir / ".version"
+    expected_version = f"{group}:{artifact}:{version}:{shared_archive.name}"
+
+    refresh = True
+    if bin_dir.exists() and src_dir.exists() and version_file.exists():
+        if version_file.read_text(encoding="utf-8").strip() == expected_version:
+            refresh = False
+
+    if refresh:
+        if workdir.exists():
+            shutil.rmtree(workdir)
+        workdir.mkdir(parents=True, exist_ok=True)
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(shared_archive, archive_copy)
+        print(f"[i] Using local archive: {archive_copy}")
+        extract_archive(archive_copy, src_dir)
+
+        classes_from_archive = find_classes_dir(src_dir)
+        if classes_from_archive:
+            shutil.copytree(classes_from_archive, bin_dir, dirs_exist_ok=True)
+        else:
+            print("[i] Building classes from local source archive...")
+            try:
+                built_classes = build_from_source(src_dir)
+                shutil.copytree(built_classes, bin_dir, dirs_exist_ok=True)
+            except Exception as exc:
+                print(f"[!] Build from source failed: {exc}")
+                print("[i] Falling back to project binary jar for classes...")
+                bin_jar = download_binary_to_workspace(group, artifact, version, archive_dir)
+                unzip_jar(bin_jar, bin_dir)
+
+        version_file.write_text(expected_version, encoding="utf-8")
+    else:
+        print(f"[i] Using cached stable artifact for {project} at {workdir}")
+
     # Ensure JUnit and Hamcrest are available
     junit = download_artifact(JUNIT_COORD[2], JUNIT_COORD[0], JUNIT_COORD[1])
     hamcrest = download_artifact(HAMCREST_COORD[2], HAMCREST_COORD[0], HAMCREST_COORD[1])
-    
-    classpath = os.pathsep.join([str(bin_jar), str(junit), str(hamcrest)])
+
+    classpath = os.pathsep.join([str(bin_dir), str(junit), str(hamcrest)])
     return bin_dir, src_dir, classpath
 
 
@@ -555,6 +686,19 @@ def run_jacoco_tests(workdir: Path, jacoco_agent: Path, jacoco_cli: Path,
     log_file = workdir / "junit.log"
     run_cmd_logged(cmd, log_file, cwd=workdir, check=False)
     
+    # Build a JaCoCo classfiles view that excludes multi-release duplicates.
+    classfiles_dir = workdir / "jacoco-classfiles"
+    if classfiles_dir.exists():
+        shutil.rmtree(classfiles_dir)
+    classfiles_dir.mkdir(parents=True, exist_ok=True)
+    for cls in bin_dir.rglob("*.class"):
+        rel = cls.relative_to(bin_dir)
+        if len(rel.parts) >= 2 and rel.parts[0] == "META-INF" and rel.parts[1] == "versions":
+            continue
+        dst = classfiles_dir / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(cls, dst)
+
     # Generate report
     report_dir = workdir / "jacoco-report"
     report_dir.mkdir(exist_ok=True)
@@ -562,7 +706,7 @@ def run_jacoco_tests(workdir: Path, jacoco_agent: Path, jacoco_cli: Path,
     cmd = [
         "java", "-jar", str(jacoco_cli),
         "report", str(exec_file),
-        "--classfiles", str(bin_dir),
+        "--classfiles", str(classfiles_dir),
         "--sourcefiles", str(workdir / "src"),
         "--html", str(report_dir),
         "--xml", str(report_dir / "jacoco.xml"),

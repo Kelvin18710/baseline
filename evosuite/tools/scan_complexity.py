@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Scan cyclomatic complexity for stable Maven artifacts using dataset/complex/cc_scan.py.
+Scan cyclomatic complexity for stable Maven artifacts using local tools/cc_scan.py.
 """
 import argparse
 import subprocess
@@ -8,8 +8,8 @@ import sys
 from pathlib import Path
 
 EVOSUITE_ROOT = Path(__file__).resolve().parents[1]
-REPO_ROOT = EVOSUITE_ROOT.parents[1]
-CC_SCAN = REPO_ROOT / "dataset" / "complex" / "cc_scan.py"
+SCRIPT_DIR = Path(__file__).resolve().parent
+CC_SCAN = SCRIPT_DIR / "cc_scan.py"
 
 import run as runner  # noqa: E402
 

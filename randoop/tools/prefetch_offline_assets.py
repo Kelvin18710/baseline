@@ -5,7 +5,7 @@ Prefetch offline assets for network-poor environments.
 使用方式：
   python3 prefetch_offline_assets.py [--projects all|Lang,Math,...]
   
-从 Maven Central 下载所有项目 JAR + 源代码 + 依赖到 cache/lib 和 cache/project_archives。
+从 Maven Central 下载项目源代码包到 baseline 共享目录，并下载运行依赖到 cache/lib。
 """
 
 import argparse
@@ -18,8 +18,9 @@ from typing import List, Tuple
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 RANDOOP_ROOT = SCRIPT_DIR.parent
+BASELINE_ROOT = RANDOOP_ROOT.parent
 LIB_DIR = RANDOOP_ROOT / "cache" / "lib"
-PROJECT_TAR_DIR = RANDOOP_ROOT / "cache" / "project_archives"
+SHARED_PROJECT_ARCHIVES_DIR = BASELINE_ROOT / "shared_project_packages" / "project_archives"
 
 # Same coordinates as run.py
 STABLE_COORDS = {
@@ -64,33 +65,17 @@ def download_file(url: str, dest: Path, description: str = "") -> bool:
 
 
 def ensure_project(project: str, coords: Tuple[str, str, str]) -> bool:
-    """Download binary and sources for a project."""
+    """Download sources for a project into baseline shared archive cache."""
     artifact, version, group = coords
-    
-    # Binary JAR
-    bin_jar = LIB_DIR / f"{artifact}-{version}.jar"
-    if not bin_jar.exists():
-        url = maven_url(group, artifact, version)
-        if not download_file(url, bin_jar, f"[BIN] {project}"):
-            return False
-    else:
-        print(f"  [OK] binary: {bin_jar}")
-    
-    # Sources JAR
-    src_jar = LIB_DIR / f"{artifact}-{version}-sources.jar"
-    if not src_jar.exists():
-        url = maven_url(group, artifact, version, "sources")
-        if not download_file(url, src_jar, f"[SRC] {project}"):
-            return False
-    else:
-        print(f"  [OK] sources: {src_jar}")
-    
-    # Copy sources to project_archives for offline extraction
-    PROJECT_TAR_DIR.mkdir(parents=True, exist_ok=True)
-    archive_copy = PROJECT_TAR_DIR / f"{project.lower()}-{artifact}-{version}-sources.jar"
+
+    # Copy sources to baseline-shared project archives for offline extraction
+    SHARED_PROJECT_ARCHIVES_DIR.mkdir(parents=True, exist_ok=True)
+    archive_copy = SHARED_PROJECT_ARCHIVES_DIR / f"{project.lower()}-{artifact}-{version}-sources.jar"
     if not archive_copy.exists():
         try:
-            shutil.copy2(src_jar, archive_copy)
+            src_url = maven_url(group, artifact, version, "sources")
+            if not download_file(src_url, archive_copy, f"[SRC] {project}"):
+                return False
             print(f"  [OK] archive: {archive_copy}")
         except Exception as e:
             print(f"  [FAIL] archiving: {e}")
@@ -171,9 +156,10 @@ def main():
         return False
     
     print(f"[i] Prefetch for projects: {', '.join(projects)}")
+    print(f"[i] shared project archives: {SHARED_PROJECT_ARCHIVES_DIR}")
     
     LIB_DIR.mkdir(parents=True, exist_ok=True)
-    PROJECT_TAR_DIR.mkdir(parents=True, exist_ok=True)
+    SHARED_PROJECT_ARCHIVES_DIR.mkdir(parents=True, exist_ok=True)
     
     # Download runtime deps
     if not ensure_runtime_deps():

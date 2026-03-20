@@ -25,9 +25,12 @@ randoop/
     method_coverage/             # 历史覆盖率报告
   
   cache/
-    lib/                         # JAR 文件（二进制 + 源代码）
-    project_archives/            # 项目源代码存档（.jar 格式）
+    lib/                         # 仅运行时依赖（Randoop/JUnit/Hamcrest/JaCoCo）
     project_workspace/           # 解压/编译的项目树
+
+baseline/
+  shared_project_packages/
+    project_archives/            # 共享项目源代码包（EvoSuite/Randoop 共用）
 ```
 
 ## 支持的项目

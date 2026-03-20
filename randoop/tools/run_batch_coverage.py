@@ -222,25 +222,31 @@ def main() -> None:
         class_slug = slugify(class_fqcn)
         classlist = workdir / f"classlist_{class_slug}.txt"
 
-        # 1) Generate tests once per class.
-        runner.build_classlist(bin_dir, classlist, class_fqcn)
-
-        # Clean previous generated tests before class run.
         class_test_src = workdir / "randoop-tests" / "src"
         class_test_bin = workdir / "randoop-tests" / "bin"
-        if class_test_src.exists():
-            shutil.rmtree(class_test_src)
-        if class_test_bin.exists():
-            shutil.rmtree(class_test_bin)
-
-        runner.run_randoop(workdir, randoop_jar, classpath, classlist, args.time_limit)
-
         base_src = workdir / "randoop-tests" / "base_src" / class_slug
-        base_src.parent.mkdir(parents=True, exist_ok=True)
-        if base_src.exists():
-            shutil.rmtree(base_src)
-        if class_test_src.exists():
-            shutil.copytree(class_test_src, base_src)
+        class_error = None
+
+        # 1) Generate tests once per class.
+        try:
+            runner.build_classlist(bin_dir, classlist, class_fqcn)
+
+            # Clean previous generated tests before class run.
+            if class_test_src.exists():
+                shutil.rmtree(class_test_src)
+            if class_test_bin.exists():
+                shutil.rmtree(class_test_bin)
+
+            runner.run_randoop(workdir, randoop_jar, classpath, classlist, args.time_limit)
+
+            base_src.parent.mkdir(parents=True, exist_ok=True)
+            if base_src.exists():
+                shutil.rmtree(base_src)
+            if class_test_src.exists():
+                shutil.copytree(class_test_src, base_src)
+        except Exception as e:
+            class_error = str(e)
+            print(f"[!] Class-level generation failed for {class_fqcn}: {class_error}")
 
         for method_name in method_list:
             iter_start = time.time()
@@ -251,46 +257,51 @@ def main() -> None:
             log_file = log_dir / f"{method_slug}.log"
             tests_path = artifact_report_path = exec_path = ""
             status = "ok"
+            kept = 0
 
-            # Restore full class test pool for each method filter.
-            if class_test_src.exists():
-                shutil.rmtree(class_test_src)
-            if base_src.exists():
-                shutil.copytree(base_src, class_test_src)
-
-            kept = runner.filter_randoop_tests_by_method(class_test_src, class_fqcn, method_name)
-
-            coverage = {"line": (0, 0), "instr": (0, 0), "branch": (0, 0)}
-            if kept == 0:
-                status = "no-test-hit"
+            if class_error:
+                status = f"class-setup-error:{class_error}"
+                coverage = {"line": (0, 0), "instr": (0, 0), "branch": (0, 0)}
             else:
-                try:
-                    if class_test_bin.exists():
-                        shutil.rmtree(class_test_bin)
-                    cp_with_junit = os.pathsep.join([classpath, str(workdir / "src")])
-                    runner.compile_tests(class_test_src, class_test_bin, cp_with_junit)
-                    test_classes = runner.collect_test_classes(class_test_bin)
-                    report_dir = runner.run_jacoco_tests(
-                        workdir,
-                        jacoco_agent,
-                        jacoco_cli,
-                        os.pathsep.join([str(class_test_bin), classpath]),
-                        test_classes,
-                        bin_dir,
-                    )
-                    xml_file = report_dir / "jacoco.xml"
+                # Restore full class test pool for each method filter.
+                if class_test_src.exists():
+                    shutil.rmtree(class_test_src)
+                if base_src.exists():
+                    shutil.copytree(base_src, class_test_src)
 
-                    # method-level mapping
-                    javap_lines = runner.run_javap(bin_dir, class_fqcn)
-                    parsed_methods = runner.parse_javap(javap_lines)
-                    m_lines = runner.collect_method_lines(parsed_methods, method_name)
-                    if not m_lines:
-                        status = "method-lines-missing"
-                    else:
-                        line_cov = runner.load_line_coverage(xml_file, class_fqcn)
-                        coverage = runner.compute_method_coverage_from_lines(line_cov, m_lines)
-                except Exception as e:
-                    status = f"coverage-error:{e}"
+                kept = runner.filter_randoop_tests_by_method(class_test_src, class_fqcn, method_name)
+
+                coverage = {"line": (0, 0), "instr": (0, 0), "branch": (0, 0)}
+                if kept == 0:
+                    status = "no-test-hit"
+                else:
+                    try:
+                        if class_test_bin.exists():
+                            shutil.rmtree(class_test_bin)
+                        cp_with_junit = os.pathsep.join([classpath, str(workdir / "src")])
+                        runner.compile_tests(class_test_src, class_test_bin, cp_with_junit)
+                        test_classes = runner.collect_test_classes(class_test_bin)
+                        report_dir = runner.run_jacoco_tests(
+                            workdir,
+                            jacoco_agent,
+                            jacoco_cli,
+                            os.pathsep.join([str(class_test_bin), classpath]),
+                            test_classes,
+                            bin_dir,
+                        )
+                        xml_file = report_dir / "jacoco.xml"
+
+                        # method-level mapping
+                        javap_lines = runner.run_javap(bin_dir, class_fqcn)
+                        parsed_methods = runner.parse_javap(javap_lines)
+                        m_lines = runner.collect_method_lines(parsed_methods, method_name)
+                        if not m_lines:
+                            status = "method-lines-missing"
+                        else:
+                            line_cov = runner.load_line_coverage(xml_file, class_fqcn)
+                            coverage = runner.compute_method_coverage_from_lines(line_cov, m_lines)
+                    except Exception as e:
+                        status = f"coverage-error:{e}"
 
             values = compute_method_coverage(coverage)
             line_cov, instr_cov, branch_cov, line_num, line_den, instr_num, instr_den, branch_num, branch_den = values

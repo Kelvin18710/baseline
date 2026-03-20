@@ -9,7 +9,7 @@ Default behavior (safe clean):
 
 Use --all-cache to also remove dependency/source caches:
 - cache/lib
-- cache/project_archives
+- ../shared_project_packages/project_archives
 """
 
 import argparse
@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import List
 
 EVOSUITE_ROOT = Path(__file__).resolve().parents[1]
+BASELINE_ROOT = EVOSUITE_ROOT.parent
 
 
 def rm_path(path: Path, dry_run: bool) -> bool:
@@ -54,7 +55,7 @@ def collect_targets(all_cache: bool) -> List[Path]:
         targets.extend(
             [
                 EVOSUITE_ROOT / "cache" / "lib",
-                EVOSUITE_ROOT / "cache" / "project_archives",
+                BASELINE_ROOT / "shared_project_packages" / "project_archives",
             ]
         )
     return targets
@@ -63,7 +64,7 @@ def collect_targets(all_cache: bool) -> List[Path]:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Clean generated artifacts under baseline/evosuite")
     parser.add_argument("--dry-run", action="store_true", help="仅打印将删除的路径")
-    parser.add_argument("--all-cache", action="store_true", help="额外清理 cache/lib 与 cache/project_archives")
+    parser.add_argument("--all-cache", action="store_true", help="额外清理 cache/lib 与共享 project_archives")
     args = parser.parse_args()
 
     removed = 0

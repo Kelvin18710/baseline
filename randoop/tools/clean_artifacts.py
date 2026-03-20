@@ -7,7 +7,7 @@ Clean up artifacts and cache.
   
 选项：
   --dry-run:    Preview what will be deleted (don't actually delete)
-  --all-cache:  Also delete cache/lib and cache/project_archives (offline assets)
+    --all-cache:  Also delete cache/lib and shared project archives (offline assets)
 """
 
 import argparse
@@ -17,6 +17,7 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 RANDOOP_ROOT = SCRIPT_DIR.parent
+BASELINE_ROOT = RANDOOP_ROOT.parent
 
 
 def list_paths(paths: list, dry_run: bool = False):
@@ -84,7 +85,8 @@ def main():
     if all_cache:
         paths.extend([
             RANDOOP_ROOT / "cache" / "lib",
-            RANDOOP_ROOT / "cache" / "project_archives",
+            RANDOOP_ROOT / "lib",
+            BASELINE_ROOT / "shared_project_packages" / "project_archives",
         ])
     
     # List what will be deleted
