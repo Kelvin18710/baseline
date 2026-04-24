@@ -126,7 +126,7 @@ python3 tools/clean_artifacts.py --all-cache
 
 ## 支持项目与版本（JDK8 可用配置）
 
-- `Lang` -> `org.apache.commons:commons-lang3:3.18.0`
+- `Lang` -> `org.apache.commons:commons-lang3:3.20.0`
 - `Math` -> `org.apache.commons:commons-math3:3.6.1`
 - `Cli` -> `commons-cli:commons-cli:1.6.0`
 - `Codec` -> `commons-codec:commons-codec:1.21.0`

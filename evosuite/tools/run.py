@@ -45,7 +45,7 @@ LIB_DIR = EVOSUITE_ROOT / "cache" / "lib"
 SHARED_PROJECT_ARCHIVES_DIR = BASELINE_ROOT / "shared_project_packages" / "project_archives"
 
 STABLE_COORDS = {
-    "Lang": ("commons-lang3", "3.18.0", "org.apache.commons"),
+    "Lang": ("commons-lang3", "3.20.0", "org.apache.commons"),
     "Math": ("commons-math3", "3.6.1", "org.apache.commons"),
     "Cli": ("commons-cli", "1.6.0", "commons-cli"),
     "Codec": ("commons-codec", "1.21.0", "commons-codec"),

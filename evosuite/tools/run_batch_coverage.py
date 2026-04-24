@@ -19,8 +19,7 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
 EVOSUITE_ROOT = Path(__file__).resolve().parents[1]
-REPO_ROOT = EVOSUITE_ROOT.parents[1]
-CC_SCAN = REPO_ROOT / "dataset" / "complex" / "cc_scan.py"
+CC_SCAN = Path(__file__).resolve().parent / "cc_scan.py"
 import run as runner  # noqa: E402
 
 RUN_SCRIPT = Path(__file__).resolve().parent / "run.py"

@@ -25,10 +25,9 @@ from typing import List, Optional
 
 TOOLS_DIR = Path(__file__).resolve().parent
 EVOSUITE_ROOT = TOOLS_DIR.parent
-REPO_ROOT = EVOSUITE_ROOT.parents[1]
 
 # Reuse CC scanner utilities
-CC_SCAN_PATH = REPO_ROOT / "dataset" / "complex" / "cc_scan.py"
+CC_SCAN_PATH = TOOLS_DIR / "cc_scan.py"
 sys.path.insert(0, str(CC_SCAN_PATH.parent))
 import cc_scan  # type: ignore  # noqa: E402
 
