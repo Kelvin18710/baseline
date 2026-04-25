@@ -364,7 +364,18 @@ def find_build_root(root: Path) -> Optional[Path]:
 def build_from_source(src_root: Path) -> Path:
     build_root = find_build_root(src_root)
     if not build_root:
-        raise RuntimeError(f"Cannot find build root (pom.xml/build.gradle) under {src_root}")
+        # Fallback for source-only archives (e.g., Maven sources.jar without build files):
+        # compile all Java files directly into a local classes directory.
+        java_files = sorted(str(p) for p in src_root.rglob("*.java"))
+        if not java_files:
+            raise RuntimeError(f"Cannot find build root or Java sources under {src_root}")
+
+        classes_dir = src_root / "classes"
+        classes_dir.mkdir(parents=True, exist_ok=True)
+        argfile = src_root / ".javac_sources.txt"
+        argfile.write_text("\n".join(java_files) + "\n", encoding="utf-8")
+        run_cmd(["javac", "-g", "-d", str(classes_dir), "@" + str(argfile)])
+        return classes_dir
 
     pom = build_root / "pom.xml"
     gradle = build_root / "build.gradle"
