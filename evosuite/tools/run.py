@@ -10,6 +10,7 @@
 """
 
 import argparse
+import contextlib
 import os
 import re
 import shutil
@@ -21,6 +22,10 @@ import tarfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import List, Optional, Tuple
+try:
+    import fcntl
+except Exception:  # pragma: no cover
+    fcntl = None  # type: ignore
 
 # ------------------------- Constants -------------------------
 DEFAULT_PROJECTS = [
@@ -88,6 +93,20 @@ def run_cmd_logged(cmd: List[str], log_path: Path, cwd: Optional[Path] = None, c
     if check and rc != 0:
         raise RuntimeError("Command failed (rc={0}): {1}".format(rc, " ".join(cmd)))
     return rc
+
+
+@contextlib.contextmanager
+def project_lock(lock_path: Path):
+    """Process-level lock for shared project workspace preparation."""
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("w", encoding="utf-8") as fp:
+        if fcntl is not None:
+            fcntl.flock(fp.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            if fcntl is not None:
+                fcntl.flock(fp.fileno(), fcntl.LOCK_UN)
 
 
 def fqcn_to_path(fqcn: str) -> str:
@@ -449,33 +468,34 @@ def prepare_stable_project(project: str, need_classes: bool = True) -> Tuple[Pat
     local_archive = workdir / "project_package" / shared_archive.name
     archive_tag = local_archive.name if local_archive else "maven"
     expected_version = f"{group}:{artifact}:{version}:{archive_tag}"
+    lock_path = PROJECT_ROOT / f".{project}_stable.lock"
+    with project_lock(lock_path):
+        refresh = True
+        if classes_dir.exists() and src_dir.exists() and version_file.exists():
+            if version_file.read_text().strip() == expected_version:
+                refresh = False
 
-    refresh = True
-    if classes_dir.exists() and src_dir.exists() and version_file.exists():
-        if version_file.read_text().strip() == expected_version:
-            refresh = False
-
-    if refresh:
-        if workdir.exists():
-            shutil.rmtree(workdir)
-        workdir.mkdir(parents=True, exist_ok=True)
-        local_archive.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(shared_archive, local_archive)
-        if local_archive:
-            print(f"[i] Using local archive: {local_archive}")
-            extract_archive(local_archive, src_dir)
-        if need_classes:
+        if refresh:
+            if workdir.exists():
+                shutil.rmtree(workdir)
+            workdir.mkdir(parents=True, exist_ok=True)
+            local_archive.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(shared_archive, local_archive)
             if local_archive:
-                classes_from_archive = find_classes_dir(src_dir)
-                if classes_from_archive:
-                    shutil.copytree(classes_from_archive, classes_dir, dirs_exist_ok=True)
-                else:
-                    print("[i] Building classes from local source archive...")
-                    built_classes = build_from_source(src_dir)
-                    shutil.copytree(built_classes, classes_dir, dirs_exist_ok=True)
-        version_file.write_text(expected_version, encoding="utf-8")
-    else:
-        print(f"[i] Using cached stable artifact for {project} at {workdir}")
+                print(f"[i] Using local archive: {local_archive}")
+                extract_archive(local_archive, src_dir)
+            if need_classes:
+                if local_archive:
+                    classes_from_archive = find_classes_dir(src_dir)
+                    if classes_from_archive:
+                        shutil.copytree(classes_from_archive, classes_dir, dirs_exist_ok=True)
+                    else:
+                        print("[i] Building classes from local source archive...")
+                        built_classes = build_from_source(src_dir)
+                        shutil.copytree(built_classes, classes_dir, dirs_exist_ok=True)
+            version_file.write_text(expected_version, encoding="utf-8")
+        else:
+            print(f"[i] Using cached stable artifact for {project} at {workdir}")
 
     junit, hamcrest = ensure_junit_hamcrest()
     cp = os.pathsep.join([str(classes_dir), str(junit), str(hamcrest)])

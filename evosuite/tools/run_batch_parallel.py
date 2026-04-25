@@ -21,7 +21,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--log-dir", default=None, help="并行 worker 日志目录（默认不重定向）")
     parser.add_argument("--dry-run", action="store_true", help="仅打印命令，不实际执行")
     args, unknown = parser.parse_known_args()
-    args._unknown = unknown
+    # Be tolerant to accidental empty args from multiline copy/paste.
+    args._unknown = [x for x in unknown if x and x.strip()]
     return args
 
 
