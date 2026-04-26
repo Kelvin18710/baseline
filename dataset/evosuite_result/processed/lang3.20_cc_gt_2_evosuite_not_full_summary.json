@@ -1,0 +1,16 @@
+{
+  "project_key": "lang3.20",
+  "cc_strict_gt": 2,
+  "access_levels": [],
+  "include_constructors": true,
+  "method_pool_count": 884,
+  "coverage_total_rows": 888,
+  "matched_coverage_rows": 884,
+  "missing_coverage_rows": 0,
+  "coverage_unmatched_rows": 4,
+  "fully_covered_methods": 376,
+  "not_fully_covered_methods": 508,
+  "coverage_csv": "/mnt/data/work/baseline/dataset/evosuite_result/Lang_stable_coverage.csv",
+  "method_pool_csv": "/mnt/data/work/baseline/dataset/evosuite_result/processed/lang3.20_cc_gt_2_all_access_methods.csv",
+  "not_full_csv": "/mnt/data/work/baseline/dataset/evosuite_result/processed/lang3.20_cc_gt_2_evosuite_not_full_coverage.csv"
+}

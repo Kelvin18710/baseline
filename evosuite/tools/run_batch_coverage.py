@@ -66,25 +66,135 @@ def load_cc_rows(csv_path: Path, min_cc: int) -> List[Dict[str, str]]:
     return rows
 
 
-def generate_cc_csv(project: str, out_path: Path, threshold: int) -> None:
+def csv_has_required_columns(fieldnames: Optional[List[str]], required: List[str]) -> bool:
+    if not fieldnames:
+        return False
+    cols = set(fieldnames)
+    return all(col in cols for col in required)
+
+
+def detect_csv_schema(csv_path: Path) -> str:
+    with csv_path.open("r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        fieldnames = list(reader.fieldnames or [])
+
+    if csv_has_required_columns(fieldnames, ["method_FEN", "project_dir"]):
+        return "sampled"
+    if csv_has_required_columns(fieldnames, ["class_guess", "method", "params", "start_line", "cc"]):
+        return "cc_scan"
+    if csv_has_required_columns(fieldnames, ["method_fen", "class_name_guess", "method_name", "params_types", "line_number", "cc"]):
+        return "dataset_methods"
+    raise RuntimeError(
+        "Unsupported CSV schema for {0}. Found columns: {1}".format(
+            csv_path, ", ".join(fieldnames)
+        )
+    )
+
+
+def normalize_project_name(name: Optional[str]) -> str:
+    return "".join(ch for ch in (name or "").lower() if ch.isalnum())
+
+
+def project_names_match(expected: Optional[str], actual: Optional[str]) -> bool:
+    lhs = normalize_project_name(expected)
+    rhs = normalize_project_name(actual)
+    if not lhs or not rhs:
+        return True
+    return lhs == rhs or lhs.startswith(rhs) or rhs.startswith(lhs)
+
+
+def load_dataset_method_rows(
+    csv_path: Path,
+    project_name: Optional[str],
+    project_dir: Optional[str],
+    min_cc: int,
+) -> List[Dict[str, str]]:
+    rows: List[Dict[str, str]] = []
+    with csv_path.open("r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            row_project = (row.get("project") or "").strip()
+            if project_name and row_project and not project_names_match(project_name, row_project):
+                continue
+            row_project_dir = (row.get("project_dir") or "").strip()
+            if project_dir and row_project_dir and row_project_dir != project_dir:
+                continue
+            try:
+                cc = int(row.get("cc", "0"))
+            except Exception:
+                cc = 0
+            if cc < min_cc:
+                continue
+
+            method_fen = row.get("method_fen", "")
+            target_class, target_method, params = parse_method_fen(method_fen)
+            if not target_class or not target_method:
+                continue
+
+            rows.append({
+                "class": target_class,
+                "method": target_method,
+                "params": params,
+                "start_line": row.get("line_number", ""),
+                "cc": str(cc),
+                "project_dir": row_project_dir,
+            })
+    return rows
+
+
+def ensure_generated_cc_csv(project: str, out_path: Path, threshold: int) -> None:
     if not CC_SCAN.exists():
         raise RuntimeError(f"Cannot find cc_scan.py at {CC_SCAN}")
 
-    _, src_dir, _ = runner.prepare_stable_project(project, need_classes=False)
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = out_path.parent / (out_path.name + ".lock")
 
-    cmd = [
-        sys.executable,
-        str(CC_SCAN),
-        "--root",
-        str(src_dir),
-        "--out",
-        str(out_path),
-        "--threshold",
-        str(threshold),
-    ]
-    print("[*] auto-generate CC CSV:", " ".join(cmd))
-    subprocess.run(cmd, check=True)
+    with runner.project_lock(lock_path):
+        if out_path.exists() and out_path.stat().st_size > 0:
+            try:
+                if detect_csv_schema(out_path) == "cc_scan":
+                    print("[i] Reusing cached CC CSV:", out_path)
+                    return
+            except Exception:
+                pass
+
+        _, src_dir, _ = runner.prepare_stable_project(project, need_classes=False)
+        tmp_path = out_path.with_suffix(out_path.suffix + ".tmp")
+        if tmp_path.exists():
+            tmp_path.unlink()
+
+        cmd = [
+            sys.executable,
+            str(CC_SCAN),
+            "--root",
+            str(src_dir),
+            "--out",
+            str(tmp_path),
+            "--threshold",
+            str(threshold),
+        ]
+        print("[*] auto-generate CC CSV:", " ".join(cmd))
+        subprocess.run(cmd, check=True)
+
+        if detect_csv_schema(tmp_path) != "cc_scan":
+            raise RuntimeError("Generated CC CSV has unexpected schema: {0}".format(tmp_path))
+        tmp_path.replace(out_path)
+
+
+def load_rows_from_input_csv(
+    csv_path: Path,
+    min_cc: int,
+    project_name: Optional[str],
+    project_dir: Optional[str],
+) -> List[Dict[str, str]]:
+    schema = detect_csv_schema(csv_path)
+    if schema == "sampled":
+        return load_sampled_rows(csv_path, project_dir)
+    if schema == "cc_scan":
+        return load_cc_rows(csv_path, min_cc)
+    if schema == "dataset_methods":
+        return load_dataset_method_rows(csv_path, project_name, project_dir, min_cc)
+    raise RuntimeError("Unhandled CSV schema: {0}".format(schema))
 
 
 def parse_method_fen(method_fen: str) -> Tuple[str, str, str]:
@@ -229,12 +339,15 @@ def run_target(project: str, target_class: str, target_method: str, args, log_pa
 
 
 def write_summary_row(summary_path: Path, header: List[str], row: Dict[str, str]) -> None:
-    exists = summary_path.exists()
-    with summary_path.open("a", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=header)
-        if not exists:
-            writer.writeheader()
-        writer.writerow(row)
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = summary_path.parent / (summary_path.name + ".lock")
+    with runner.project_lock(lock_path):
+        exists = summary_path.exists()
+        with summary_path.open("a", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=header)
+            if not exists:
+                writer.writeheader()
+            writer.writerow(row)
 
 
 def copy_artifacts(tests_dir: Path, report_dir: Path, exec_file: Path, dest_dir: Path) -> Tuple[Path, Path, Path]:
@@ -285,17 +398,21 @@ def main():
     parser.add_argument("--no-artifacts", action="store_true", help="不保存测试/Jacoco 产物")
     args = parser.parse_args()
 
+    project_dir = args.sampled_project_dir or infer_project_dir(args.project)
+    cc_threshold = 2
+
     if args.sampled_csv:
-        sampled_csv = Path(args.sampled_csv)
-        if not sampled_csv.exists():
-            raise RuntimeError(f"Sampled CSV not found: {sampled_csv}")
-        project_dir = args.sampled_project_dir or infer_project_dir(args.project)
-        rows = load_sampled_rows(sampled_csv, project_dir)
+        input_csv = Path(args.sampled_csv)
+        if not input_csv.exists():
+            raise RuntimeError(f"Sampled CSV not found: {input_csv}")
+        rows = load_rows_from_input_csv(input_csv, cc_threshold, args.project, project_dir)
     else:
         cc_csv = Path(args.cc_csv) if args.cc_csv else EVOSUITE_ROOT / "data" / "complexity" / f"{args.project}_stable_cc.csv"
-        cc_threshold = 2
-        generate_cc_csv(args.project, cc_csv, cc_threshold)
-        rows = load_cc_rows(cc_csv, cc_threshold)
+        if args.cc_csv and cc_csv.exists():
+            rows = load_rows_from_input_csv(cc_csv, cc_threshold, args.project, project_dir)
+        else:
+            ensure_generated_cc_csv(args.project, cc_csv, cc_threshold)
+            rows = load_rows_from_input_csv(cc_csv, cc_threshold, args.project, project_dir)
     if not rows:
         print("[WARN] No rows found after filtering.")
         return
