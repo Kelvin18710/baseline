@@ -395,6 +395,13 @@ def ensure_project_extra_jars(project: str) -> List[Path]:
     return jars
 
 
+def sanitize_workdir_suffix(workdir_suffix: Optional[str]) -> str:
+    if not workdir_suffix:
+        return ""
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", workdir_suffix.strip())
+    return safe.strip("._-")
+
+
 def build_from_source(src_root: Path, compile_cp: Optional[List[Path]] = None) -> Path:
     build_root = find_build_root(src_root)
     if not build_root:
@@ -469,11 +476,16 @@ def ensure_jacoco() -> Tuple[Path, Path]:
     return agent, cli
 
 
-def prepare_stable_project(project: str, need_classes: bool = True) -> Tuple[Path, Path, str]:
+def prepare_stable_project(project: str, need_classes: bool = True,
+                           workdir_suffix: Optional[str] = None) -> Tuple[Path, Path, str]:
     if project not in STABLE_COORDS:
         raise RuntimeError(f"Unknown project {project}")
     artifact, version, group = STABLE_COORDS[project]
-    workdir = PROJECT_ROOT / f"{project}_stable"
+    safe_suffix = sanitize_workdir_suffix(workdir_suffix)
+    workdir_name = f"{project}_stable"
+    if safe_suffix:
+        workdir_name += f"_{safe_suffix}"
+    workdir = PROJECT_ROOT / workdir_name
     classes_dir = workdir / "classes"
     src_dir = workdir / "sources"
     version_file = workdir / ".version"
@@ -489,7 +501,8 @@ def prepare_stable_project(project: str, need_classes: bool = True) -> Tuple[Pat
     extra_jars = ensure_project_extra_jars(project)
     extra_tag = ",".join(jar.name for jar in extra_jars) if extra_jars else "no-extra-deps"
     expected_version = f"{group}:{artifact}:{version}:{archive_tag}:{extra_tag}"
-    lock_path = PROJECT_ROOT / f".{project}_stable.lock"
+    lock_name = f".{workdir_name}.lock"
+    lock_path = PROJECT_ROOT / lock_name
     with project_lock(lock_path):
         refresh = True
         if classes_dir.exists() and src_dir.exists() and version_file.exists():
@@ -604,7 +617,7 @@ def signature_to_descriptor_method(signature: str) -> Optional[str]:
 
 
 def run_javap(classes_dir: Path, target_fqcn: str) -> list:
-    cmd = ["javap", "-classpath", str(classes_dir), "-c", "-l", target_fqcn]
+    cmd = ["javap", "-classpath", str(classes_dir), "-c", "-l", "-p", target_fqcn]
     res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if res.returncode != 0:
         raise RuntimeError(f"javap failed: {res.stderr}")
@@ -671,15 +684,30 @@ def collect_method_lines(methods: list, method_names=None, method_signatures=Non
     method_signatures = method_signatures or []
     target_names = set(method_names)
     target_sigs = set(method_signatures)
-    method_lines = {key: set() for key in (target_sigs or target_names)}
+    target_filters = set()
+    for sig in method_signatures:
+        evo_sig = signature_to_evosuite_method(sig)
+        if evo_sig:
+            target_filters.add(evo_sig)
+    for name in method_names:
+        if name:
+            target_filters.add(name)
+
+    method_lines = {key: set() for key in (target_sigs or target_names or target_filters)}
 
     for m in methods:
         sig = m.get("signature", "")
         name = extract_method_name(sig)
+        evo_sig = signature_to_evosuite_method(sig)
         lines = set(m.get("line_table", {}).values())
         if target_sigs:
             if sig in target_sigs:
                 method_lines.setdefault(sig, set()).update(lines)
+        elif target_filters:
+            if evo_sig and evo_sig in target_filters:
+                method_lines.setdefault(evo_sig, set()).update(lines)
+            elif name in target_filters:
+                method_lines.setdefault(name, set()).update(lines)
         else:
             if name in target_names:
                 method_lines.setdefault(name, set()).update(lines)
@@ -690,7 +718,8 @@ def load_line_coverage(xml_report: Path, target_fqcn: str) -> dict:
     target_path = fqcn_to_path(target_fqcn)
     target_pkg = target_path.rsplit("/", 1)[0] if "/" in target_path else target_path
     simple = target_fqcn.split(".")[-1]
-    source_file_name = simple + ".java"
+    source_owner = simple.split("$", 1)[0]
+    source_file_name = source_owner + ".java"
 
     tree = ET.parse(xml_report)
     root = tree.getroot()
@@ -844,10 +873,10 @@ def run_coverage(workdir: Path, jacoco_agent: Path, jacoco_cli: Path, cp: str,
     coverage_map = load_line_coverage(xml_report, target_class)
     methods = parse_javap(run_javap(class_files, target_class))
     method_signatures = [target_method_signature] if target_method_signature else []
-    method_names = [method_name_from_filter(target_method)] if target_method else []
-    method_lines_map = collect_method_lines(methods, method_names, method_signatures)
+    method_filters = [target_method] if target_method else []
+    method_lines_map = collect_method_lines(methods, method_filters, method_signatures)
 
-    for name in (method_signatures or method_names):
+    for name in (method_signatures or method_filters):
         lines = method_lines_map.get(name, set())
         if not lines:
             print("[WARN] 未找到方法行号：", name)
@@ -927,6 +956,7 @@ def main():
     ap.add_argument("--project", default="Lang", choices=DEFAULT_PROJECTS, help="项目名（默认 Lang）")
     ap.add_argument("--time-limit", type=int, default=0, help="EvoSuite 搜索预算（秒），<=0 时使用 EvoSuite 默认")
     ap.add_argument("--seed", type=int, default=None, help="随机种子（可选，不传则使用 EvoSuite 默认）")
+    ap.add_argument("--workdir-suffix", default=None, help="工作目录后缀（用于并行时隔离每个 worker 的 workdir）")
     ap.add_argument("--target-class", required=True, help="目标类全限定名")
     ap.add_argument("--target-method", default=None, help="目标方法名")
     ap.add_argument("--target-method-signature", default=None, help="目标方法签名（javap 格式）")
@@ -948,7 +978,7 @@ def main():
     ap.add_argument("--min-generated-tests", type=int, default=1, help="方法过滤后最少生成测试数（低于则触发重试）")
     args = ap.parse_args()
 
-    workdir, src_dir, cp_base = prepare_stable_project(args.project)
+    workdir, src_dir, cp_base = prepare_stable_project(args.project, workdir_suffix=args.workdir_suffix)
     classes_dir = workdir / "classes"
 
     evosuite_jar = ensure_evosuite()

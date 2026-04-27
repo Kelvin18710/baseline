@@ -104,6 +104,8 @@ CC_PATTERNS = [
     (re.compile(r"\|\|"), 1),
 ]
 
+TYPE_DECL_RE = re.compile(r"\b(class|interface|enum|record)\s+([A-Za-z_]\w*)[^;{]*\{", re.M)
+
 
 def ensure_project_root(project_key: str) -> Path:
     project_cfg = CONFIG["projects"][project_key]
@@ -309,8 +311,84 @@ def compute_cc(method_body: str) -> int:
     return cc
 
 
+def find_matching_brace(clean_code: str, brace_pos: int) -> int:
+    depth = 0
+    n = len(clean_code)
+    pos = brace_pos
+    while pos < n:
+        if clean_code[pos] == "{":
+            depth += 1
+        elif clean_code[pos] == "}":
+            depth -= 1
+            if depth == 0:
+                return pos
+        pos += 1
+    return -1
+
+
+def extract_type_ranges(clean_code: str, top_level_class_name: str) -> List[Dict[str, object]]:
+    ranges: List[Dict[str, object]] = []
+    raw_ranges: List[Dict[str, object]] = []
+
+    for match in TYPE_DECL_RE.finditer(clean_code):
+        simple_name = match.group(2)
+        brace_pos = match.end() - 1
+        end_pos = find_matching_brace(clean_code, brace_pos)
+        if end_pos < 0:
+            continue
+        raw_ranges.append(
+            {
+                "simple_name": simple_name,
+                "brace_pos": brace_pos,
+                "end_pos": end_pos,
+            }
+        )
+
+    raw_ranges.sort(key=lambda item: item["brace_pos"])
+    stack: List[Dict[str, object]] = []
+    for item in raw_ranges:
+        while stack and int(item["brace_pos"]) > int(stack[-1]["end_pos"]):
+            stack.pop()
+
+        binary_name = str(item["simple_name"])
+        if stack:
+            binary_name = "{0}${1}".format(stack[-1]["binary_name"], item["simple_name"])
+        item["binary_name"] = binary_name
+        ranges.append(item)
+        stack.append(item)
+
+    if not ranges:
+        ranges.append(
+            {
+                "simple_name": top_level_class_name,
+                "binary_name": top_level_class_name,
+                "brace_pos": 0,
+                "end_pos": len(clean_code) - 1,
+            }
+        )
+    return ranges
+
+
+def resolve_enclosing_type(type_ranges: List[Dict[str, object]], position: int,
+                           fallback_name: str) -> Dict[str, object]:
+    best = None
+    for item in type_ranges:
+        if int(item["brace_pos"]) <= position <= int(item["end_pos"]):
+            if best is None or int(item["brace_pos"]) >= int(best["brace_pos"]):
+                best = item
+    if best is not None:
+        return best
+    return {
+        "simple_name": fallback_name,
+        "binary_name": fallback_name,
+        "brace_pos": 0,
+        "end_pos": position,
+    }
+
+
 def extract_methods(clean_code: str, class_name_guess: str) -> List[Dict[str, object]]:
     methods: List[Dict[str, object]] = []
+    type_ranges = extract_type_ranges(clean_code, class_name_guess)
     n = len(clean_code)
     i = 0
 
@@ -395,7 +473,8 @@ def extract_methods(clean_code: str, class_name_guess: str) -> List[Dict[str, ob
         params = clean_code[i + 1:params_end].strip()
         access = detect_access_level(header)
         line_number = clean_code.count("\n", 0, name_start) + 1
-        is_constructor = name == class_name_guess
+        enclosing_type = resolve_enclosing_type(type_ranges, brace_pos, class_name_guess)
+        is_constructor = name == str(enclosing_type["simple_name"])
 
         methods.append(
             {
@@ -406,6 +485,8 @@ def extract_methods(clean_code: str, class_name_guess: str) -> List[Dict[str, ob
                 "line_number": line_number,
                 "body": body,
                 "is_constructor": is_constructor,
+                "class_binary_name": enclosing_type["binary_name"],
+                "class_simple_name": enclosing_type["simple_name"],
             }
         )
         i = brace_pos + 1
@@ -504,8 +585,8 @@ def params_to_types(params_str: str) -> str:
     return ",".join(normalized)
 
 
-def build_method_fen(package_name: str, class_name_guess: str, method_name: str, params: str) -> str:
-    fqcn = class_name_guess if not package_name else package_name + "." + class_name_guess
+def build_method_fen(package_name: str, class_binary_name: str, method_name: str, params: str) -> str:
+    fqcn = class_binary_name if not package_name else package_name + "." + class_binary_name
     return "{0}.{1}({2})".format(fqcn, method_name, params)
 
 
@@ -552,7 +633,7 @@ def analyze_project(project_key: str) -> Dict[str, object]:
                 params_types = params_to_types(str(method["params"]))
                 method_fen = build_method_fen(
                     package_name=package_name,
-                    class_name_guess=class_name_guess,
+                    class_binary_name=str(method["class_binary_name"]),
                     method_name=str(method["name"]),
                     params=params_types,
                 )
@@ -563,7 +644,7 @@ def analyze_project(project_key: str) -> Dict[str, object]:
                         "cc": cc_value,
                         "is_constructor": method["is_constructor"],
                         "method_fen": method_fen,
-                        "class_name_guess": class_name_guess,
+                        "class_name_guess": method["class_binary_name"],
                         "method_name": method["name"],
                         "params_types": params_types,
                         "file": rel_path,

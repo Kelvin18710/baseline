@@ -328,6 +328,8 @@ def run_target(project: str, target_class: str, target_method: str, args, log_pa
         "--min-goals", str(args.min_goals),
         "--min-generated-tests", str(args.min_generated_tests),
     ]
+    if getattr(args, "resolved_workdir_suffix", None):
+        cmd.extend(["--workdir-suffix", args.resolved_workdir_suffix])
     if args.no_fallback:
         cmd.append("--no-fallback")
 
@@ -387,6 +389,7 @@ def main():
     parser.add_argument("--start-index", type=int, default=0, help="从第几个方法开始（用于断点续跑）")
     parser.add_argument("--workers", type=int, default=1, help="并行 worker 总数（默认 1）")
     parser.add_argument("--worker-id", type=int, default=0, help="worker 编号（0~workers-1）")
+    parser.add_argument("--workdir-suffix", default=None, help="工作目录后缀前缀；并行时会自动拼接 worker 编号")
     parser.add_argument("--skip-existing", action="store_true", default=True, help="跳过 summary 中已有的条目（默认开启）")
     parser.add_argument("--no-skip-existing", action="store_true", help="禁用跳过 summary 中已有的条目")
     parser.add_argument("--out-dir", default=str(EVOSUITE_ROOT / "reports" / "batch" / "coverage"),
@@ -417,7 +420,19 @@ def main():
         print("[WARN] No rows found after filtering.")
         return
 
-    workdir, src_dir, _ = runner.prepare_stable_project(args.project)
+    if args.workers < 1:
+        raise RuntimeError("--workers 必须 >= 1")
+    if args.worker_id < 0 or args.worker_id >= args.workers:
+        raise RuntimeError("--worker-id 必须在 [0, workers-1] 范围内")
+
+    suffix_parts = []
+    if args.workdir_suffix:
+        suffix_parts.append(args.workdir_suffix)
+    if args.workers > 1:
+        suffix_parts.append("worker_{0}".format(args.worker_id))
+    args.resolved_workdir_suffix = "_".join(suffix_parts) if suffix_parts else None
+
+    workdir, src_dir, _ = runner.prepare_stable_project(args.project, workdir_suffix=args.resolved_workdir_suffix)
     classes_dir = workdir / "classes"
     tests_dir = workdir / "evosuite-tests"
 
@@ -432,11 +447,6 @@ def main():
     if args.no_skip_existing:
         args.skip_existing = False
     existing_keys = read_existing_keys(summary_path) if args.skip_existing else set()
-
-    if args.workers < 1:
-        raise RuntimeError("--workers 必须 >= 1")
-    if args.worker_id < 0 or args.worker_id >= args.workers:
-        raise RuntimeError("--worker-id 必须在 [0, workers-1] 范围内")
 
     header = [
         "project", "class", "method", "params", "start_line", "cc",
@@ -504,9 +514,9 @@ def main():
             try:
                 coverage_map = runner.load_line_coverage(report_path, target_class)
                 methods = runner.parse_javap(runner.run_javap(classes_dir, target_class))
-                method_names = [runner.method_name_from_filter(target_method)]
-                method_lines_map = runner.collect_method_lines(methods, method_names, [])
-                lines = method_lines_map.get(method_names[0], set())
+                method_filters = [target_method] if target_method else []
+                method_lines_map = runner.collect_method_lines(methods, method_filters, [])
+                lines = method_lines_map.get(method_filters[0], set()) if method_filters else set()
 
                 if not lines:
                     status = "method-lines-missing"

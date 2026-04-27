@@ -29,18 +29,18 @@ csv1.13,package-private,5,False,org.apache.commons.csv.Lexer.isDelimiter(int),Le
 csv1.13,package-private,5,False,org.apache.commons.csv.Lexer.isEscapeDelimiter(),Lexer,isEscapeDelimiter,,org/apache/commons/csv/Lexer.java,192
 csv1.13,private,4,False,"org.apache.commons.csv.CSVFormat.print(InputStream,Appendable,boolean)",CSVFormat,print,"InputStream,Appendable,boolean",org/apache/commons/csv/CSVFormat.java,2078
 csv1.13,private,4,False,"org.apache.commons.csv.CSVFormat.printWithQuotes(Reader,Appendable)",CSVFormat,printWithQuotes,"Reader,Appendable",org/apache/commons/csv/CSVFormat.java,2441
+csv1.13,public,4,False,org.apache.commons.csv.CSVParser$CSVRecordIterator.next(),CSVParser$CSVRecordIterator,next,,org/apache/commons/csv/CSVParser.java,247
 csv1.13,private,4,False,org.apache.commons.csv.CSVParser.addRecordValue(boolean),CSVParser,addRecordValue,boolean,org/apache/commons/csv/CSVParser.java,568
-csv1.13,public,4,False,org.apache.commons.csv.CSVParser.next(),CSVParser,next,,org/apache/commons/csv/CSVParser.java,247
 csv1.13,public,4,False,org.apache.commons.csv.CSVPrinter.close(boolean),CSVPrinter,close,boolean,org/apache/commons/csv/CSVPrinter.java,137
 csv1.13,private,4,False,org.apache.commons.csv.CSVPrinter.printRecordObject(Object),CSVPrinter,printRecordObject,Object,org/apache/commons/csv/CSVPrinter.java,335
 csv1.13,public,4,False,org.apache.commons.csv.CSVRecord.get(String),CSVRecord,get,String,org/apache/commons/csv/CSVRecord.java,125
 csv1.13,private,4,False,org.apache.commons.csv.ExtendedBufferedReader.getEncodedCharLength(int),ExtendedBufferedReader,getEncodedCharLength,int,org/apache/commons/csv/ExtendedBufferedReader.java,134
 csv1.13,package-private,4,False,org.apache.commons.csv.Lexer.trimTrailingSpaces(StringBuilder),Lexer,trimTrailingSpaces,StringBuilder,org/apache/commons/csv/Lexer.java,512
+csv1.13,public,3,False,org.apache.commons.csv.CSVFormat$Builder.setDelimiter(String),CSVFormat$Builder,setDelimiter,String,org/apache/commons/csv/CSVFormat.java,442
+csv1.13,public,3,False,org.apache.commons.csv.CSVFormat$Builder.setHeader(Class<?extends Enum<?>>),CSVFormat$Builder,setHeader,Class<?extends Enum<?>>,org/apache/commons/csv/CSVFormat.java,513
+csv1.13,public,3,False,org.apache.commons.csv.CSVFormat$Builder.setHeader(ResultSetMetaData),CSVFormat$Builder,setHeader,ResultSetMetaData,org/apache/commons/csv/CSVFormat.java,567
 csv1.13,public,3,False,org.apache.commons.csv.CSVFormat.println(Appendable),CSVFormat,println,Appendable,org/apache/commons/csv/CSVFormat.java,2210
-csv1.13,public,3,False,org.apache.commons.csv.CSVFormat.setDelimiter(String),CSVFormat,setDelimiter,String,org/apache/commons/csv/CSVFormat.java,442
-csv1.13,public,3,False,org.apache.commons.csv.CSVFormat.setHeader(Class<?extends Enum<?>>),CSVFormat,setHeader,Class<?extends Enum<?>>,org/apache/commons/csv/CSVFormat.java,513
-csv1.13,public,3,False,org.apache.commons.csv.CSVFormat.setHeader(ResultSetMetaData),CSVFormat,setHeader,ResultSetMetaData,org/apache/commons/csv/CSVFormat.java,567
-csv1.13,public,3,False,org.apache.commons.csv.CSVParser.hasNext(),CSVParser,hasNext,,org/apache/commons/csv/CSVParser.java,235
+csv1.13,public,3,False,org.apache.commons.csv.CSVParser$CSVRecordIterator.hasNext(),CSVParser$CSVRecordIterator,hasNext,,org/apache/commons/csv/CSVParser.java,235
 csv1.13,public,3,False,org.apache.commons.csv.CSVRecord.putIn(M),CSVRecord,putIn,M,org/apache/commons/csv/CSVRecord.java,291
 csv1.13,private,3,False,org.apache.commons.csv.Lexer.appendNextEscapedCharacterToToken(Token),Lexer,appendNextEscapedCharacterToToken,Token,org/apache/commons/csv/Lexer.java,75
 csv1.13,private,3,False,org.apache.commons.csv.Lexer.isMetaChar(int),Lexer,isMetaChar,int,org/apache/commons/csv/Lexer.java,206
