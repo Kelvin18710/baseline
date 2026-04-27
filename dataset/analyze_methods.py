@@ -41,6 +41,14 @@ CONFIG = {
             "archive": REPO_ROOT / "shared_project_packages" / "project_archives" / "codec-commons-codec-1.21.0-sources.jar",
             "type": "archive",
         },
+        "math3.6.1": {
+            "archive": REPO_ROOT / "shared_project_packages" / "project_archives" / "math-commons-math3-3.6.1-sources.jar",
+            "type": "archive",
+        },
+        "csv1.13": {
+            "archive": REPO_ROOT / "shared_project_packages" / "project_archives" / "csv-commons-csv-1.13.0-sources.jar",
+            "type": "archive",
+        },
     },
     "min_cc": 2,
     "access_levels": [],

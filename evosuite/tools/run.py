@@ -64,6 +64,13 @@ STABLE_COORDS = {
     "JodaTime": ("joda-time", "2.13.1", "joda-time"),
 }
 
+PROJECT_EXTRA_DEPS = {
+    "CSV": [
+        ("commons-io", "commons-io", "2.18.0"),
+        ("commons-codec", "commons-codec", "1.17.2"),
+    ],
+}
+
 JUNIT_COORD = ("junit", "4.13.2", "junit")
 HAMCREST_COORD = ("hamcrest-core", "1.3", "org.hamcrest")
 JACOCO_VERSION = "0.8.8"
@@ -380,7 +387,15 @@ def find_build_root(root: Path) -> Optional[Path]:
     return None
 
 
-def build_from_source(src_root: Path) -> Path:
+def ensure_project_extra_jars(project: str) -> List[Path]:
+    coords = PROJECT_EXTRA_DEPS.get(project, [])
+    jars = []
+    for group, artifact, version in coords:
+        jars.append(download_artifact(group, artifact, version))
+    return jars
+
+
+def build_from_source(src_root: Path, compile_cp: Optional[List[Path]] = None) -> Path:
     build_root = find_build_root(src_root)
     if not build_root:
         # Fallback for source-only archives (e.g., Maven sources.jar without build files):
@@ -393,7 +408,11 @@ def build_from_source(src_root: Path) -> Path:
         classes_dir.mkdir(parents=True, exist_ok=True)
         argfile = src_root / ".javac_sources.txt"
         argfile.write_text("\n".join(java_files) + "\n", encoding="utf-8")
-        run_cmd(["javac", "-g", "-d", str(classes_dir), "@" + str(argfile)])
+        cmd = ["javac", "-g", "-d", str(classes_dir)]
+        if compile_cp:
+            cmd.extend(["-cp", os.pathsep.join(str(p) for p in compile_cp)])
+        cmd.append("@" + str(argfile))
+        run_cmd(cmd)
         return classes_dir
 
     pom = build_root / "pom.xml"
@@ -467,7 +486,9 @@ def prepare_stable_project(project: str, need_classes: bool = True) -> Tuple[Pat
 
     local_archive = workdir / "project_package" / shared_archive.name
     archive_tag = local_archive.name if local_archive else "maven"
-    expected_version = f"{group}:{artifact}:{version}:{archive_tag}"
+    extra_jars = ensure_project_extra_jars(project)
+    extra_tag = ",".join(jar.name for jar in extra_jars) if extra_jars else "no-extra-deps"
+    expected_version = f"{group}:{artifact}:{version}:{archive_tag}:{extra_tag}"
     lock_path = PROJECT_ROOT / f".{project}_stable.lock"
     with project_lock(lock_path):
         refresh = True
@@ -491,14 +512,15 @@ def prepare_stable_project(project: str, need_classes: bool = True) -> Tuple[Pat
                         shutil.copytree(classes_from_archive, classes_dir, dirs_exist_ok=True)
                     else:
                         print("[i] Building classes from local source archive...")
-                        built_classes = build_from_source(src_dir)
+                        built_classes = build_from_source(src_dir, compile_cp=extra_jars)
                         shutil.copytree(built_classes, classes_dir, dirs_exist_ok=True)
             version_file.write_text(expected_version, encoding="utf-8")
         else:
             print(f"[i] Using cached stable artifact for {project} at {workdir}")
 
     junit, hamcrest = ensure_junit_hamcrest()
-    cp = os.pathsep.join([str(classes_dir), str(junit), str(hamcrest)])
+    cp_entries = [str(classes_dir), str(junit), str(hamcrest)] + [str(jar) for jar in extra_jars]
+    cp = os.pathsep.join(cp_entries)
     return workdir, src_dir, cp
 
 
