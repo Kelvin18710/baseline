@@ -1,0 +1,14 @@
+{
+  "project": "csv1.13",
+  "project_root": "/mnt/data/work/baseline/dataset/_workspace/csv1.13",
+  "source_roots": [
+    "/mnt/data/work/baseline/dataset/_workspace/csv1.13"
+  ],
+  "min_cc": 2,
+  "access_levels": [],
+  "include_constructors": true,
+  "scanned_java_files": 11,
+  "recognized_methods": 262,
+  "matched_methods": 78,
+  "csv_path": "/mnt/data/work/baseline/dataset/outputs/csv1.13_all-access_cc_ge_2_methods.csv"
+}

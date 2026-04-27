@@ -1,0 +1,14 @@
+{
+  "project": "math3.6.1",
+  "project_root": "/mnt/data/work/baseline/dataset/_workspace/math3.6.1",
+  "source_roots": [
+    "/mnt/data/work/baseline/dataset/_workspace/math3.6.1"
+  ],
+  "min_cc": 3,
+  "access_levels": [],
+  "include_constructors": true,
+  "scanned_java_files": 914,
+  "recognized_methods": 7691,
+  "matched_methods": 1944,
+  "csv_path": "/mnt/data/work/baseline/dataset/outputs/math3.6.1_all-access_cc_gt_2_methods.csv"
+}

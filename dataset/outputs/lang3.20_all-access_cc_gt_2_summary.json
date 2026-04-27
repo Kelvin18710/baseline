@@ -1,0 +1,14 @@
+{
+  "project": "lang3.20",
+  "project_root": "/mnt/data/work/baseline/dataset/_workspace/lang3.20",
+  "source_roots": [
+    "/mnt/data/work/baseline/dataset/_workspace/lang3.20"
+  ],
+  "min_cc": 3,
+  "access_levels": [],
+  "include_constructors": true,
+  "scanned_java_files": 241,
+  "recognized_methods": 4154,
+  "matched_methods": 882,
+  "csv_path": "dataset/outputs/lang3.20_all-access_cc_gt_2_methods.csv"
+}

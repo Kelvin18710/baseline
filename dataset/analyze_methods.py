@@ -331,6 +331,7 @@ def extract_type_ranges(clean_code: str, top_level_class_name: str) -> List[Dict
     raw_ranges: List[Dict[str, object]] = []
 
     for match in TYPE_DECL_RE.finditer(clean_code):
+        kind = match.group(1)
         simple_name = match.group(2)
         brace_pos = match.end() - 1
         end_pos = find_matching_brace(clean_code, brace_pos)
@@ -338,6 +339,7 @@ def extract_type_ranges(clean_code: str, top_level_class_name: str) -> List[Dict
             continue
         raw_ranges.append(
             {
+                "kind": kind,
                 "simple_name": simple_name,
                 "brace_pos": brace_pos,
                 "end_pos": end_pos,
@@ -360,6 +362,7 @@ def extract_type_ranges(clean_code: str, top_level_class_name: str) -> List[Dict
     if not ranges:
         ranges.append(
             {
+                "kind": "class",
                 "simple_name": top_level_class_name,
                 "binary_name": top_level_class_name,
                 "brace_pos": 0,
@@ -379,6 +382,7 @@ def resolve_enclosing_type(type_ranges: List[Dict[str, object]], position: int,
     if best is not None:
         return best
     return {
+        "kind": "class",
         "simple_name": fallback_name,
         "binary_name": fallback_name,
         "brace_pos": 0,
@@ -386,9 +390,36 @@ def resolve_enclosing_type(type_ranges: List[Dict[str, object]], position: int,
     }
 
 
+def is_nested_inside_method(method_ranges: List[Dict[str, int]], position: int) -> bool:
+    for item in method_ranges:
+        if item["body_start"] < position < item["body_end"]:
+            return True
+    return False
+
+
+def is_inside_enum_constant_body(clean_code: str, enclosing_type: Dict[str, object], position: int) -> bool:
+    if enclosing_type.get("kind") != "enum":
+        return False
+
+    start = int(enclosing_type["brace_pos"]) + 1
+    depth = 0
+    i = start
+    while i < position:
+        ch = clean_code[i]
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth = max(depth - 1, 0)
+        elif ch == ";" and depth == 0:
+            return False
+        i += 1
+    return True
+
+
 def extract_methods(clean_code: str, class_name_guess: str) -> List[Dict[str, object]]:
     methods: List[Dict[str, object]] = []
     type_ranges = extract_type_ranges(clean_code, class_name_guess)
+    method_ranges: List[Dict[str, int]] = []
     n = len(clean_code)
     i = 0
 
@@ -474,6 +505,14 @@ def extract_methods(clean_code: str, class_name_guess: str) -> List[Dict[str, ob
         access = detect_access_level(header)
         line_number = clean_code.count("\n", 0, name_start) + 1
         enclosing_type = resolve_enclosing_type(type_ranges, brace_pos, class_name_guess)
+
+        if is_nested_inside_method(method_ranges, name_start):
+            i = brace_pos + 1
+            continue
+        if is_inside_enum_constant_body(clean_code, enclosing_type, name_start):
+            i = brace_pos + 1
+            continue
+
         is_constructor = name == str(enclosing_type["simple_name"])
 
         methods.append(
@@ -489,6 +528,7 @@ def extract_methods(clean_code: str, class_name_guess: str) -> List[Dict[str, ob
                 "class_simple_name": enclosing_type["simple_name"],
             }
         )
+        method_ranges.append({"body_start": brace_pos, "body_end": p})
         i = brace_pos + 1
 
     return methods

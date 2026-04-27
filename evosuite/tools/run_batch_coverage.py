@@ -316,18 +316,22 @@ def compute_method_coverage(
 
 
 def run_target(project: str, target_class: str, target_method: str, args, log_path: Path) -> int:
+    target_method_name = runner.method_name_from_filter(target_method) if target_method else ""
+    target_method_signature = target_method if target_method and "(" in target_method else ""
     cmd = [
         sys.executable, str(RUN_SCRIPT),
         "--project", project,
         "--time-limit", str(args.time_limit),
         "--target-class", target_class,
-        "--target-method", target_method,
+        "--target-method", target_method_name,
         "--method-filter-mode", args.method_filter_mode,
         "--min-tests", str(args.min_tests),
         "--min-tests-retry-mult", str(args.min_tests_retry_mult),
         "--min-goals", str(args.min_goals),
         "--min-generated-tests", str(args.min_generated_tests),
     ]
+    if target_method_signature:
+        cmd.extend(["--target-method-signature", target_method_signature])
     if getattr(args, "resolved_workdir_suffix", None):
         cmd.extend(["--workdir-suffix", args.resolved_workdir_suffix])
     if args.no_fallback:
@@ -514,9 +518,11 @@ def main():
             try:
                 coverage_map = runner.load_line_coverage(report_path, target_class)
                 methods = runner.parse_javap(runner.run_javap(classes_dir, target_class))
-                method_filters = [target_method] if target_method else []
-                method_lines_map = runner.collect_method_lines(methods, method_filters, [])
-                lines = method_lines_map.get(method_filters[0], set()) if method_filters else set()
+                method_signature_filters = [target_method] if target_method and "(" in target_method else []
+                method_name_filters = [target_method] if target_method and "(" not in target_method else []
+                method_lines_map = runner.collect_method_lines(methods, method_name_filters, method_signature_filters)
+                lookup_key = target_method if target_method else ""
+                lines = method_lines_map.get(lookup_key, set()) if lookup_key else set()
 
                 if not lines:
                     status = "method-lines-missing"

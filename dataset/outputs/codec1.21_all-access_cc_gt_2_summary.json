@@ -1,0 +1,14 @@
+{
+  "project": "codec1.21",
+  "project_root": "/mnt/data/work/baseline/dataset/_workspace/codec1.21",
+  "source_roots": [
+    "/mnt/data/work/baseline/dataset/_workspace/codec1.21"
+  ],
+  "min_cc": 3,
+  "access_levels": [],
+  "include_constructors": true,
+  "scanned_java_files": 76,
+  "recognized_methods": 1040,
+  "matched_methods": 188,
+  "csv_path": "dataset/outputs/codec1.21_all-access_cc_gt_2_methods.csv"
+}

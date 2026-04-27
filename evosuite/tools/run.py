@@ -75,6 +75,20 @@ JUNIT_COORD = ("junit", "4.13.2", "junit")
 HAMCREST_COORD = ("hamcrest-core", "1.3", "org.hamcrest")
 JACOCO_VERSION = "0.8.8"
 EVOSUITE_VERSION = "1.2.0"
+JAVA_MODIFIERS = {
+    "public",
+    "protected",
+    "private",
+    "static",
+    "final",
+    "abstract",
+    "native",
+    "synchronized",
+    "strictfp",
+    "default",
+    "transient",
+    "volatile",
+}
 
 
 # ------------------------- Utils -------------------------
@@ -159,7 +173,8 @@ def count_method_calls_in_test(test_file: Optional[Path], target_class: str, met
     if (not test_file) or (not test_file.exists()):
         return 0
     simple = target_class.split(".")[-1]
-    pattern = r"\b{0}\s*\.\s*{1}\s*\(".format(re.escape(simple), re.escape(method_name))
+    target_name = method_name_from_filter(method_name)
+    pattern = r"\b{0}\s*\.\s*{1}\s*\(".format(re.escape(simple), re.escape(target_name))
     content = test_file.read_text(encoding="utf-8", errors="ignore")
     return len(re.findall(pattern, content))
 
@@ -189,7 +204,8 @@ def mark_ignored_tests_by_call(test_file: Optional[Path], target_class: str, met
     if (not test_file) or (not test_file.exists()):
         return 0
     simple = target_class.split(".")[-1]
-    call_pattern = re.compile(r"\b{0}\s*\.\s*{1}\s*\(".format(re.escape(simple), re.escape(method_name)))
+    target_name = method_name_from_filter(method_name)
+    call_pattern = re.compile(r"\b{0}\s*\.\s*{1}\s*\(".format(re.escape(simple), re.escape(target_name)))
     method_pattern = re.compile(r"^\s*public\s+void\s+(test\d+)\s*\(")
 
     lines = test_file.read_text(encoding="utf-8", errors="ignore").splitlines()
@@ -539,12 +555,140 @@ def prepare_stable_project(project: str, need_classes: bool = True,
 
 # ------------------------- Method Parsing -------------------------
 
-def extract_method_name(signature: str) -> str:
-    head = signature.split("(")[0].strip()
-    if not head:
-        return ""
+def clean_signature_text(signature: str) -> str:
+    s = (signature or "").strip()
+    if " throws " in s:
+        s = s.split(" throws ", 1)[0].strip()
+    if s.endswith(";"):
+        s = s[:-1].strip()
+    return s
+
+
+def split_java_params(params_str: str) -> List[str]:
+    params = []
+    cur = []
+    depth_angle = 0
+    depth_paren = 0
+    depth_bracket = 0
+    for ch in params_str:
+        if ch == "<":
+            depth_angle += 1
+        elif ch == ">" and depth_angle > 0:
+            depth_angle -= 1
+        elif ch == "(":
+            depth_paren += 1
+        elif ch == ")" and depth_paren > 0:
+            depth_paren -= 1
+        elif ch == "[":
+            depth_bracket += 1
+        elif ch == "]" and depth_bracket > 0:
+            depth_bracket -= 1
+        elif ch == "," and depth_angle == 0 and depth_paren == 0 and depth_bracket == 0:
+            part = "".join(cur).strip()
+            if part:
+                params.append(part)
+            cur = []
+            continue
+        cur.append(ch)
+    tail = "".join(cur).strip()
+    if tail:
+        params.append(tail)
+    return params
+
+
+def simplify_java_name(name: str) -> str:
+    token = name.strip()
+    if not token:
+        return token
+    token = token.split(".")[-1]
+    token = token.split("$")[-1]
+    return token
+
+
+def normalize_java_type(type_name: str) -> str:
+    t = (type_name or "").strip()
+    if not t:
+        return t
+    t = t.replace("...", "[]")
+    t = re.sub(r"@[\w$.]+(?:\([^)]*\))?\s*", "", t)
+    t = re.sub(r"\b(?:final|volatile|transient)\b\s+", "", t)
+    t = re.sub(
+        r"\b[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+\b",
+        lambda m: simplify_java_name(m.group(0)),
+        t,
+    )
+    t = re.sub(r"\s+", "", t)
+    return t
+
+
+def strip_java_generics(type_name: str) -> str:
+    out = []
+    depth = 0
+    for ch in type_name:
+        if ch == "<":
+            depth += 1
+            continue
+        if ch == ">":
+            if depth > 0:
+                depth -= 1
+            continue
+        if depth == 0:
+            out.append(ch)
+    return "".join(out)
+
+
+def descriptor_type_name(type_name: str) -> str:
+    t = (type_name or "").strip()
+    if not t:
+        return t
+    t = t.replace("...", "[]")
+    t = re.sub(r"@[\w$.]+(?:\([^)]*\))?\s*", "", t)
+    t = re.sub(r"\b(?:final|volatile|transient)\b\s+", "", t)
+    t = strip_java_generics(t)
+    t = re.sub(r"\s+", "", t)
+    return t
+
+
+def parse_signature_parts(signature: str) -> Tuple[str, List[str], Optional[str], bool]:
+    s = clean_signature_text(signature)
+    if "(" not in s or ")" not in s:
+        return "", [], None, False
+
+    head = s.split("(", 1)[0].strip()
+    params_str = s[s.find("(") + 1:s.rfind(")")]
+    params = split_java_params(params_str)
     parts = head.split()
-    return parts[-1] if parts else ""
+    if not parts:
+        return "", params, None, False
+
+    member_token = parts[-1]
+    prefix_tokens = parts[:-1]
+    method_name = simplify_java_name(member_token)
+    if not prefix_tokens:
+        is_constructor = bool(method_name[:1].isupper() or "." in member_token or "$" in member_token)
+    else:
+        is_constructor = all(tok in JAVA_MODIFIERS or tok.startswith("@") for tok in prefix_tokens)
+    return_type = None if (is_constructor or not prefix_tokens) else prefix_tokens[-1]
+    return method_name, params, return_type, is_constructor
+
+
+def normalize_method_filter(signature: str) -> Optional[str]:
+    s = clean_signature_text(signature)
+    if not s:
+        return None
+    if "(" not in s or ")" not in s:
+        base = method_name_from_filter(s)
+        return simplify_java_name(base) if base else None
+    method_name, params, _, _ = parse_signature_parts(s)
+    if not method_name:
+        return None
+    normalized_params = [normalize_java_type(p) for p in params]
+    return f"{method_name}({','.join(normalized_params)})"
+
+
+def extract_method_name(signature: str) -> str:
+    normalized = normalize_method_filter(signature)
+    return method_name_from_filter(normalized) if normalized else ""
 
 
 def method_name_from_filter(name: str) -> str:
@@ -555,23 +699,21 @@ def method_name_from_filter(name: str) -> str:
 
 
 def signature_to_evosuite_method(signature: str) -> Optional[str]:
-    if not signature:
+    normalized = normalize_method_filter(signature)
+    if not normalized or "(" not in normalized or ")" not in normalized:
         return None
-    s = signature.strip()
-    if " throws " in s:
-        s = s.split(" throws ", 1)[0].strip()
-    if s.endswith(";"):
-        s = s[:-1].strip()
-    name = extract_method_name(s)
-    if not name or "(" not in s or ")" not in s:
+    return normalized
+
+
+def signature_to_exact_method_filter(signature: str) -> Optional[str]:
+    method_name, params, _, _ = parse_signature_parts(signature)
+    if not method_name:
         return None
-    params_str = s[s.find("(") + 1:s.rfind(")")]
-    params = [p.strip() for p in params_str.split(",") if p.strip()]
-    return f"{name}({','.join(params)})"
+    return f"{method_name}({','.join(p.strip() for p in params)})"
 
 
 def java_type_to_descriptor(type_name: str) -> str:
-    t = type_name.strip()
+    t = descriptor_type_name(type_name)
     if not t:
         return ""
     array_dim = 0
@@ -596,22 +738,14 @@ def java_type_to_descriptor(type_name: str) -> str:
 def signature_to_descriptor_method(signature: str) -> Optional[str]:
     if not signature:
         return None
-    s = signature.strip()
-    if " throws " in s:
-        s = s.split(" throws ", 1)[0].strip()
-    if s.endswith(";"):
-        s = s[:-1].strip()
-    if "(" not in s or ")" not in s:
+    method_name, params, return_type, is_constructor = parse_signature_parts(signature)
+    if not method_name:
         return None
-    head = s.split("(", 1)[0].strip()
-    parts = head.split()
-    if len(parts) < 2:
-        return None
-    method_name = parts[-1]
-    return_type = parts[-2]
-    params_str = s[s.find("(") + 1:s.rfind(")")]
-    params = [p.strip() for p in params_str.split(",") if p.strip()]
     params_desc = "".join(java_type_to_descriptor(p) for p in params)
+    if is_constructor:
+        return f"<init>({params_desc})V"
+    if return_type is None:
+        return None
     ret_desc = java_type_to_descriptor(return_type)
     return f"{method_name}({params_desc}){ret_desc}"
 
@@ -682,35 +816,50 @@ def parse_javap(lines: list) -> list:
 def collect_method_lines(methods: list, method_names=None, method_signatures=None) -> dict:
     method_names = method_names or []
     method_signatures = method_signatures or []
-    target_names = set(method_names)
-    target_sigs = set(method_signatures)
-    target_filters = set()
-    for sig in method_signatures:
-        evo_sig = signature_to_evosuite_method(sig)
-        if evo_sig:
-            target_filters.add(evo_sig)
-    for name in method_names:
-        if name:
-            target_filters.add(name)
+    target_keys = []
+    target_name_aliases = {}
+    target_sig_aliases = {}
 
-    method_lines = {key: set() for key in (target_sigs or target_names or target_filters)}
+    for raw in method_signatures:
+        if not raw:
+            continue
+        target_keys.append(raw)
+        normalized_sig = signature_to_evosuite_method(raw)
+        if normalized_sig:
+            target_sig_aliases.setdefault(normalized_sig, set()).add(raw)
+        base_name = method_name_from_filter(normalized_sig or raw)
+        if base_name:
+            target_name_aliases.setdefault(base_name, set()).add(raw)
+
+    for raw in method_names:
+        if not raw:
+            continue
+        target_keys.append(raw)
+        normalized_sig = signature_to_evosuite_method(raw)
+        if normalized_sig:
+            target_sig_aliases.setdefault(normalized_sig, set()).add(raw)
+        base_name = method_name_from_filter(normalized_sig or raw)
+        if base_name:
+            target_name_aliases.setdefault(base_name, set()).add(raw)
+
+    method_lines = {key: set() for key in target_keys}
 
     for m in methods:
         sig = m.get("signature", "")
         name = extract_method_name(sig)
         evo_sig = signature_to_evosuite_method(sig)
         lines = set(m.get("line_table", {}).values())
-        if target_sigs:
-            if sig in target_sigs:
-                method_lines.setdefault(sig, set()).update(lines)
-        elif target_filters:
-            if evo_sig and evo_sig in target_filters:
-                method_lines.setdefault(evo_sig, set()).update(lines)
-            elif name in target_filters:
-                method_lines.setdefault(name, set()).update(lines)
-        else:
-            if name in target_names:
-                method_lines.setdefault(name, set()).update(lines)
+        matched = False
+        if evo_sig and evo_sig in target_sig_aliases:
+            for alias in target_sig_aliases[evo_sig]:
+                method_lines.setdefault(alias, set()).update(lines)
+            matched = True
+        if name in target_name_aliases:
+            for alias in target_name_aliases[name]:
+                method_lines.setdefault(alias, set()).update(lines)
+            matched = True
+        if not matched and sig in method_lines:
+            method_lines.setdefault(sig, set()).update(lines)
     return method_lines
 
 
@@ -770,19 +919,51 @@ def build_method_filters(classes_dir: Path, target_class: str, target_method: Op
     if method_filter_mode in ("name", "post-filter"):
         return None, None
 
+    normalized_target_sig = signature_to_evosuite_method(target_method_signature) if target_method_signature else None
+    target_method_base = method_name_from_filter(target_method) if target_method else None
+    methods_for_filters = parse_javap(run_javap(classes_dir, target_class))
+
     if target_method_signature:
-        resolved_method_list = signature_to_evosuite_method(target_method_signature) or target_method_signature.strip()
-        descriptor_method_list = signature_to_descriptor_method(target_method_signature)
-    elif target_method:
-        methods_for_filters = parse_javap(run_javap(classes_dir, target_class))
         candidates = []
         descriptor_candidates = []
         for m in methods_for_filters:
             sig = m.get("signature", "")
-            if extract_method_name(sig) == target_method:
-                evo_sig = signature_to_evosuite_method(sig)
-                if evo_sig:
-                    candidates.append(evo_sig)
+            normalized_sig = signature_to_evosuite_method(sig)
+            if normalized_target_sig and normalized_sig != normalized_target_sig:
+                continue
+            exact_sig = signature_to_exact_method_filter(sig)
+            if exact_sig:
+                candidates.append(exact_sig)
+            desc_sig = signature_to_descriptor_method(sig)
+            if desc_sig:
+                descriptor_candidates.append(desc_sig)
+        if candidates:
+            resolved_method_list = ":".join(sorted(set(candidates)))
+        else:
+            resolved_method_list = signature_to_exact_method_filter(target_method_signature) or target_method_signature.strip()
+        if descriptor_candidates:
+            descriptor_method_list = ":".join(sorted(set(descriptor_candidates)))
+        else:
+            descriptor_method_list = signature_to_descriptor_method(target_method_signature)
+    elif target_method:
+        candidates = []
+        descriptor_candidates = []
+        for m in methods_for_filters:
+            sig = m.get("signature", "")
+            extracted_name = extract_method_name(sig)
+            normalized_sig = signature_to_evosuite_method(sig)
+            if normalized_target_sig and normalized_sig == normalized_target_sig:
+                exact_sig = signature_to_exact_method_filter(sig)
+                if exact_sig:
+                    candidates.append(exact_sig)
+                desc_sig = signature_to_descriptor_method(sig)
+                if desc_sig:
+                    descriptor_candidates.append(desc_sig)
+                continue
+            if extracted_name == target_method_base:
+                exact_sig = signature_to_exact_method_filter(sig)
+                if exact_sig:
+                    candidates.append(exact_sig)
                 desc_sig = signature_to_descriptor_method(sig)
                 if desc_sig:
                     descriptor_candidates.append(desc_sig)
