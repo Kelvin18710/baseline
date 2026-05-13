@@ -612,6 +612,14 @@ def normalize_java_type(type_name: str) -> str:
     t = t.replace("...", "[]")
     t = re.sub(r"@[\w$.]+(?:\([^)]*\))?\s*", "", t)
     t = re.sub(r"\b(?:final|volatile|transient)\b\s+", "", t)
+    array_suffix = ""
+    suffix_match = re.search(r"(\s*(?:\[\s*\])+\s*)$", t)
+    if suffix_match:
+        array_suffix = re.sub(r"\s+", "", suffix_match.group(1))
+        t = t[:suffix_match.start()].strip()
+    if " " in t:
+        t = t.rsplit(" ", 1)[0].strip()
+    t = t + array_suffix
     t = re.sub(
         r"\b[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+\b",
         lambda m: simplify_java_name(m.group(0)),
@@ -644,6 +652,14 @@ def descriptor_type_name(type_name: str) -> str:
     t = t.replace("...", "[]")
     t = re.sub(r"@[\w$.]+(?:\([^)]*\))?\s*", "", t)
     t = re.sub(r"\b(?:final|volatile|transient)\b\s+", "", t)
+    array_suffix = ""
+    suffix_match = re.search(r"(\s*(?:\[\s*\])+\s*)$", t)
+    if suffix_match:
+        array_suffix = re.sub(r"\s+", "", suffix_match.group(1))
+        t = t[:suffix_match.start()].strip()
+    if " " in t:
+        t = t.rsplit(" ", 1)[0].strip()
+    t = t + array_suffix
     t = strip_java_generics(t)
     t = re.sub(r"\s+", "", t)
     return t
