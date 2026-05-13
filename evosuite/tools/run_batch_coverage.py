@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Batch run run.py for selected methods and collect coverage stats.
 
-python3 /home/kelvin/work/baseline/evosuite/tools/run_batch_coverage.py \
+python3 ./evosuite/tools/run_batch_coverage.py \
   --project JxPath \
-    --sampled-csv /home/kelvin/work/baseline/evosuite/data/sampled_methods.csv \
+  --sampled-csv ./evosuite/data/sampled_methods.csv \
   --sampled-project-dir commons-jxpath \
   --time-limit 10
 
@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
 EVOSUITE_ROOT = Path(__file__).resolve().parents[1]
+BASELINE_ROOT = EVOSUITE_ROOT.parent
 CC_SCAN = Path(__file__).resolve().parent / "cc_scan.py"
 import run as runner  # noqa: E402
 
@@ -49,6 +50,14 @@ def slugify(text: str) -> str:
             out.append("_")
     slug = "".join(out).strip("_")
     return slug[:160] if len(slug) > 160 else slug
+
+
+def repo_relative(path: Path) -> str:
+    resolved = Path(path).resolve()
+    try:
+        return str(resolved.relative_to(BASELINE_ROOT))
+    except ValueError:
+        return str(path)
 
 
 def load_cc_rows(csv_path: Path, min_cc: int) -> List[Dict[str, str]]:
@@ -267,6 +276,18 @@ def make_method_key(target_class: str, target_method: str, params: str, start_li
     )
 
 
+def method_filter_from_row(target_method: str, params: str) -> str:
+    method = (target_method or "").strip()
+    if not method:
+        return ""
+    if "(" in method and ")" in method:
+        return method
+    params = (params or "").strip()
+    if not params:
+        return method
+    return "{0}({1})".format(method, params)
+
+
 def compute_method_coverage(
     coverage_map: Dict[int, Dict[str, int]],
     lines: Iterable[int],
@@ -315,9 +336,9 @@ def compute_method_coverage(
     return line_ratio, instr_ratio, branch_ratio, line_covered, known_total, covered_instr, total_instr, covered_branch, total_branch
 
 
-def run_target(project: str, target_class: str, target_method: str, args, log_path: Path) -> int:
-    target_method_name = runner.method_name_from_filter(target_method) if target_method else ""
-    target_method_signature = target_method if target_method and "(" in target_method else ""
+def run_target(project: str, target_class: str, target_method_filter: str, args, log_path: Path) -> int:
+    target_method_name = runner.method_name_from_filter(target_method_filter) if target_method_filter else ""
+    target_method_signature = target_method_filter if target_method_filter and "(" in target_method_filter else ""
     cmd = [
         sys.executable, str(RUN_SCRIPT),
         "--project", project,
@@ -406,20 +427,21 @@ def main():
     args = parser.parse_args()
 
     project_dir = args.sampled_project_dir or infer_project_dir(args.project)
-    cc_threshold = 2
+    min_cc = 2
+    cc_scan_threshold = min_cc - 1
 
     if args.sampled_csv:
         input_csv = Path(args.sampled_csv)
         if not input_csv.exists():
             raise RuntimeError(f"Sampled CSV not found: {input_csv}")
-        rows = load_rows_from_input_csv(input_csv, cc_threshold, args.project, project_dir)
+        rows = load_rows_from_input_csv(input_csv, min_cc, args.project, project_dir)
     else:
         cc_csv = Path(args.cc_csv) if args.cc_csv else EVOSUITE_ROOT / "data" / "complexity" / f"{args.project}_stable_cc.csv"
         if args.cc_csv and cc_csv.exists():
-            rows = load_rows_from_input_csv(cc_csv, cc_threshold, args.project, project_dir)
+            rows = load_rows_from_input_csv(cc_csv, min_cc, args.project, project_dir)
         else:
-            ensure_generated_cc_csv(args.project, cc_csv, cc_threshold)
-            rows = load_rows_from_input_csv(cc_csv, cc_threshold, args.project, project_dir)
+            ensure_generated_cc_csv(args.project, cc_csv, cc_scan_threshold)
+            rows = load_rows_from_input_csv(cc_csv, min_cc, args.project, project_dir)
     if not rows:
         print("[WARN] No rows found after filtering.")
         return
@@ -492,6 +514,7 @@ def main():
         target_class = row.get("class_guess") or row.get("class") or ""
         target_method = row.get("method") or ""
         params = row.get("params") or ""
+        target_method_filter = method_filter_from_row(target_method, params)
         start_line = row.get("start_line") or ""
         cc_val = row.get("cc") or ""
 
@@ -511,17 +534,17 @@ def main():
         exec_file = workdir / "jacoco.exec"
         tests_path = artifact_report_path = exec_path = ""
 
-        rc = run_target(args.project, target_class, target_method, args, log_path)
+        rc = run_target(args.project, target_class, target_method_filter, args, log_path)
         if rc != 0:
             status = f"error(rc={rc})"
         else:
             try:
                 coverage_map = runner.load_line_coverage(report_path, target_class)
                 methods = runner.parse_javap(runner.run_javap(classes_dir, target_class))
-                method_signature_filters = [target_method] if target_method and "(" in target_method else []
-                method_name_filters = [target_method] if target_method and "(" not in target_method else []
+                method_signature_filters = [target_method_filter] if target_method_filter and "(" in target_method_filter else []
+                method_name_filters = [target_method_filter] if target_method_filter and "(" not in target_method_filter else []
                 method_lines_map = runner.collect_method_lines(methods, method_name_filters, method_signature_filters)
-                lookup_key = target_method if target_method else ""
+                lookup_key = target_method_filter if target_method_filter else ""
                 lines = method_lines_map.get(lookup_key, set()) if lookup_key else set()
 
                 if not lines:
@@ -545,7 +568,7 @@ def main():
 
                 test_file = runner.find_evosuite_test_file(tests_dir, target_class)
                 tests = str(runner.count_tests_in_file(test_file))
-                calls = str(runner.count_method_calls_in_test(test_file, target_class, target_method))
+                calls = str(runner.count_method_calls_in_test(test_file, target_class, target_method_filter))
             except Exception as exc:
                 status = f"coverage-error:{exc}"
 
@@ -579,11 +602,11 @@ def main():
             "branch_cov_den": branch_cov_den,
             "tests": tests,
             "calls": calls,
-            "log_path": str(log_path),
-            "report_path": str(report_path),
-            "tests_path": tests_path,
-            "artifact_report_path": artifact_report_path,
-            "exec_path": exec_path,
+            "log_path": repo_relative(log_path),
+            "report_path": repo_relative(report_path),
+            "tests_path": repo_relative(Path(tests_path)) if tests_path else "",
+            "artifact_report_path": repo_relative(Path(artifact_report_path)) if artifact_report_path else "",
+            "exec_path": repo_relative(Path(exec_path)) if exec_path else "",
         }
         write_summary_row(summary_path, header, row_out)
         processed += 1
@@ -604,7 +627,7 @@ def main():
             print(f"[ETA] avg {avg:.1f}s/iter, remaining ~{eta_text}")
 
     print("\n=== batch done ===")
-    print("summary:", summary_path)
+    print("summary:", repo_relative(summary_path))
 
 
 if __name__ == "__main__":

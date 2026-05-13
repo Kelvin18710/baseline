@@ -13,4 +13,9 @@ evosuite/data/
 randoop/cache/project_workspace/
 randoop/data/
 dataset/_workspace
+dataset/evosuite_result/new_result/
+dataset/evosuite_result/new_result2/
+dataset/evosuite_result/processed/cli1.6_*
+dataset/evosuite_result/processed/collections4.5_*
+dataset/evosuite_result/processed/csv1.13_*
 tmp/
