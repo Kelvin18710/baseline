@@ -14,6 +14,7 @@ set -euo pipefail
 # - 方法：cc >= 2。
 # - 访问级别：不过滤 public/protected/private/package-private。
 # - 构造器：包含。
+# - 生成方式：默认只做方法级生成，不回退到类级生成，保证不同方法之间口径一致。
 #
 # 并行说明：
 # - 每个 worker 独立使用一个 workdir 后缀，避免并行覆盖工作目录。
@@ -23,6 +24,7 @@ set -euo pipefail
 PROJECTS=(Lang Math CSV Cli Collections Codec)
 WORKERS=12
 TIME_LIMIT=20
+NO_FALLBACK=1
 
 OUT_DIR="./evosuite/reports/batch_cc_ge2/coverage"
 LOG_DIR="./evosuite/reports/batch_cc_ge2/logs"
@@ -44,6 +46,7 @@ mkdir -p "${OUT_DIR}" "${LOG_DIR}" "${ARTIFACT_DIR}" "${WORKER_STDOUT_DIR}" "${C
 echo "[INFO] projects: ${PROJECTS[*]}"
 echo "[INFO] workers: ${WORKERS}"
 echo "[INFO] time limit: ${TIME_LIMIT}"
+echo "[INFO] no fallback: ${NO_FALLBACK}"
 
 for project in "${PROJECTS[@]}"; do
   echo "===== ${project}: prepare cc >= 2 method list ====="
@@ -63,6 +66,11 @@ for project in "${PROJECTS[@]}"; do
 
   echo "===== ${project}: run EvoSuite workers ====="
   for worker_id in $(seq 0 "$((WORKERS - 1))"); do
+    extra_args=()
+    if [[ "${NO_FALLBACK}" == "1" ]]; then
+      extra_args+=(--no-fallback)
+    fi
+
     python3 ./evosuite/tools/run_batch_coverage.py \
       --project "${project}" \
       --cc-csv "${COMPLEXITY_DIR}/${project}_cc_ge_2.csv" \
@@ -72,6 +80,7 @@ for project in "${PROJECTS[@]}"; do
       --out-dir "${OUT_DIR}" \
       --log-dir "${LOG_DIR}" \
       --artifact-dir "${ARTIFACT_DIR}" \
+      "${extra_args[@]}" \
       > "${WORKER_STDOUT_DIR}/${project}/worker_${worker_id}.log" 2>&1 &
   done
   wait
