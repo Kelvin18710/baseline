@@ -179,6 +179,24 @@ def count_method_calls_in_test(test_file: Optional[Path], target_class: str, met
     return len(re.findall(pattern, content))
 
 
+def snapshot_tests_dir(tests_dir: Path, snapshot_dir: Path) -> bool:
+    if not has_evosuite_tests(tests_dir):
+        return False
+    if snapshot_dir.exists():
+        shutil.rmtree(snapshot_dir)
+    shutil.copytree(tests_dir, snapshot_dir)
+    return True
+
+
+def restore_tests_dir(snapshot_dir: Path, tests_dir: Path) -> bool:
+    if not has_evosuite_tests(snapshot_dir):
+        return False
+    if tests_dir.exists():
+        shutil.rmtree(tests_dir)
+    shutil.copytree(snapshot_dir, tests_dir)
+    return True
+
+
 def parse_evosuite_log(log_path: Path) -> Tuple[Optional[int], Optional[int]]:
     total_goals = None
     generated_tests = None
@@ -1233,6 +1251,8 @@ def main():
         print("[INFO] post-filter 保留测试数：", kept)
     test_count = count_tests_in_file(test_file)
     call_count = count_method_calls_in_test(test_file, args.target_class, args.target_method) if args.target_method else 0
+    filtered_tests_snapshot = workdir / "evosuite-tests-filtered"
+    snapshot_tests_dir(tests_dir, filtered_tests_snapshot)
     if (args.target_method or args.target_method_signature) and (test_count < args.min_tests):
         print("[WARN] 生成测试数过少({0})，提高预算重跑。".format(test_count))
         if tests_dir.exists():
@@ -1250,6 +1270,7 @@ def main():
         test_file = find_evosuite_test_file(tests_dir, args.target_class)
         test_count = count_tests_in_file(test_file)
         call_count = count_method_calls_in_test(test_file, args.target_class, args.target_method) if args.target_method else 0
+        snapshot_tests_dir(tests_dir, filtered_tests_snapshot)
 
     if (args.target_method or args.target_method_signature) and (not has_evosuite_tests(tests_dir)) and descriptor_method_list and args.method_filter_mode == "signature":
         print("[WARN] 方法过滤未生成测试，尝试使用 JVM 描述符格式重跑。")
@@ -1274,8 +1295,8 @@ def main():
         test_file = find_evosuite_test_file(tests_dir, args.target_class)
         test_count = count_tests_in_file(test_file)
         call_count = count_method_calls_in_test(test_file, args.target_class, args.target_method) if args.target_method else 0
-        if (test_count < args.min_tests) or (args.target_method and call_count == 0):
-            print("[WARN] 方法过滤结果不足（tests={0}, calls={1}），回退为类级生成。".format(test_count, call_count))
+        if test_count < args.min_tests:
+            print("[WARN] 方法过滤结果不足（tests={0}），回退为类级生成。".format(test_count))
             if tests_dir.exists():
                 shutil.rmtree(tests_dir)
             run_evosuite_for_class(
@@ -1283,9 +1304,14 @@ def main():
                 args.evosuite_criteria,
                 log_path=workdir / "evosuite_method_retry.log",
             )
+        elif args.target_method and call_count == 0:
+            print("[WARN] 方法调用计数为 0，保留已生成测试继续计算覆盖率。")
 
     if not has_evosuite_tests(tests_dir):
-        raise RuntimeError("未生成 EvoSuite 测试")
+        if restore_tests_dir(filtered_tests_snapshot, tests_dir):
+            print("[WARN] 回退未生成测试，已恢复方法过滤阶段生成的测试。")
+        else:
+            raise RuntimeError("未生成 EvoSuite 测试")
 
     test_file = find_evosuite_test_file(tests_dir, args.target_class)
     if disable_evorunner_separate_classloader(test_file):
